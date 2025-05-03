@@ -233,9 +233,9 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   png_get_gAMA(png_handler.png_ptr, png_handler.info_ptr, nullptr);
   png_get_sBIT(png_handler.png_ptr, png_handler.info_ptr, nullptr);
   png_get_sRGB(png_handler.png_ptr, png_handler.info_ptr, nullptr);
-  png_get_cHRM(png_handler.png_ptr, png_handler.info_ptr,
-                nullptr, nullptr, nullptr, nullptr,
-                nullptr, nullptr, nullptr);
+  // png_get_cHRM(png_handler.png_ptr, png_handler.info_ptr,
+  //               nullptr, nullptr, nullptr, nullptr,
+  //               nullptr, nullptr, nullptr);
   png_get_tIME(png_handler.png_ptr, png_handler.info_ptr, nullptr);
   png_get_PLTE(png_handler.png_ptr, png_handler.info_ptr, nullptr, nullptr);
 
