@@ -185,6 +185,19 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   png_set_scale_16(png_handler.png_ptr);
   png_set_tRNS_to_alpha(png_handler.png_ptr);
 
+  //Additional transform calls to increase pngtrans.c coverage
+  png_set_bgr(png_handler.png_ptr);
+  png_set_swap(png_handler.png_ptr);
+  png_set_packswap(png_handler.png_ptr);
+  png_set_swap_alpha(png_handler.png_ptr);
+  png_set_invert_alpha(png_handler.png_ptr);
+  png_set_invert_mono(png_handler.png_ptr);
+
+  // Set up a sample shift struct
+  png_color_8 shift = {2, 2, 2, 2, 2};  // safe dummy values
+  png_set_shift(png_handler.png_ptr, &shift);
+
+
   int passes = png_set_interlace_handling(png_handler.png_ptr);
 
   png_read_update_info(png_handler.png_ptr, png_handler.info_ptr);
@@ -201,6 +214,45 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   }
 
   png_read_end(png_handler.png_ptr, png_handler.end_info_ptr);
+
+  // Access various metadata to increase pngget.c coverage
+  // General info access 
+  volatile png_uint_32 valid_gAMA = png_get_valid(png_handler.png_ptr, png_handler.info_ptr, PNG_INFO_gAMA);
+  volatile png_uint_32 width = png_get_image_width(png_handler.png_ptr, png_handler.info_ptr);
+  volatile png_uint_32 height = png_get_image_height(png_handler.png_ptr, png_handler.info_ptr);
+  volatile png_byte depth = png_get_bit_depth(png_handler.png_ptr, png_handler.info_ptr);
+  volatile png_byte color = png_get_color_type(png_handler.png_ptr, png_handler.info_ptr);
+  volatile png_byte filter = png_get_filter_type(png_handler.png_ptr, png_handler.info_ptr);
+  volatile png_byte interlace = png_get_interlace_type(png_handler.png_ptr, png_handler.info_ptr);
+  volatile png_byte compression = png_get_compression_type(png_handler.png_ptr, png_handler.info_ptr);
+  volatile png_uint_32 x_ppm = png_get_x_pixels_per_meter(png_handler.png_ptr, png_handler.info_ptr);
+  volatile png_uint_32 y_ppm = png_get_y_pixels_per_meter(png_handler.png_ptr, png_handler.info_ptr);
+  volatile float aspect = png_get_pixel_aspect_ratio(png_handler.png_ptr, png_handler.info_ptr);
+
+  png_bytepp rows = png_get_rows(png_handler.png_ptr, png_handler.info_ptr);
+  if (rows) {
+    volatile png_bytep first_row = rows[0];
+  }
+
+  // Ancillary chunk accessors 
+  png_textp text_ptr;
+  int num_text;
+  if (png_get_text(png_handler.png_ptr, png_handler.info_ptr, &text_ptr, &num_text)) {
+    for (int i = 0; i < num_text; ++i) {
+        volatile png_charp key = text_ptr[i].key;
+        volatile png_charp txt = text_ptr[i].text;
+      }
+  }
+
+  png_color_16p background;
+  if (png_get_bKGD(png_handler.png_ptr, png_handler.info_ptr, &background)) {
+    volatile int r = background->red;
+  }
+
+  double gamma_val;
+  if (png_get_gAMA(png_handler.png_ptr, png_handler.info_ptr, &gamma_val)) {
+    volatile double g = gamma_val;
+  }
 
   PNG_CLEANUP
 
