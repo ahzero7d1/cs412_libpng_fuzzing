@@ -161,7 +161,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     return 0;
   }
 
-  png_uint_32 width, height;
+  png_uint_32 width, height, flag;
   int bit_depth, color_type, interlace_type, compression_type;
   int filter_type;
 
@@ -223,7 +223,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   png_get_rows(png_handler.png_ptr, png_handler.info_ptr);
   png_get_image_width(png_handler.png_ptr, png_handler.info_ptr);
   png_get_image_height(png_handler.png_ptr, png_handler.info_ptr);
-  png_get_valid(png_handler.png_ptr, png_handler.info_ptr);
+  png_get_valid(png_handler.png_ptr, png_handler.info_ptr, &flag);
   png_get_rowbytes(png_handler.png_ptr, png_handler.info_ptr);
   png_get_rows(png_handler.png_ptr, png_handler.info_ptr);
   png_get_channels(png_handler.png_ptr, png_handler.info_ptr);
