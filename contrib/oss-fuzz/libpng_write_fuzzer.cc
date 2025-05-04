@@ -13,6 +13,7 @@
 
 #define PNG_INTERNAL
 #include "png.h"
+#include "writepng.h"
 
 #define PNG_CLEANUP \
   if(png_handler.png_ptr) \
