@@ -263,7 +263,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     return 0;
   }
   
-  #ifdef PNG_TEXT_SUPPORTED
+#ifdef PNG_TEXT_SUPPORTED
   png_textp text_ptr;
   int num_text;
   png_get_text(png_handler.png_ptr, png_handler.info_ptr,&text_ptr, &num_text);
