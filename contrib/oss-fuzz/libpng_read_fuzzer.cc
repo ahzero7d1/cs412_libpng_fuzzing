@@ -258,7 +258,6 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   png_charp name;
   png_charp profile;
   png_uint_32 proflen;
-  int compression_type;
   if (png_get_iCCP(png_handler.png_ptr, png_handler.info_ptr, &name, &compression_type, (png_bytepp)&profile, &proflen))
    {
   volatile png_charp p = profile;
