@@ -218,8 +218,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   // Access various metadata to increase pngget.c coverage
   // General info access 
   volatile png_uint_32 valid_gAMA = png_get_valid(png_handler.png_ptr, png_handler.info_ptr, PNG_INFO_gAMA);
-  volatile png_uint_32 width = png_get_image_width(png_handler.png_ptr, png_handler.info_ptr);
-  volatile png_uint_32 height = png_get_image_height(png_handler.png_ptr, png_handler.info_ptr);
+  ((volatile png_uint_32&)width) = png_get_image_width(png_handler.png_ptr, png_handler.info_ptr);
+  ((volatile png_uint_32&)height) = png_get_image_height(png_handler.png_ptr, png_handler.info_ptr);
   volatile png_byte depth = png_get_bit_depth(png_handler.png_ptr, png_handler.info_ptr);
   volatile png_byte color = png_get_color_type(png_handler.png_ptr, png_handler.info_ptr);
   volatile png_byte filter = png_get_filter_type(png_handler.png_ptr, png_handler.info_ptr);
