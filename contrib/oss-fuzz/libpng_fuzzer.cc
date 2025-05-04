@@ -199,8 +199,74 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
                    static_cast<png_bytep>(png_handler.row_ptr), nullptr);
     }
   }
-
+  
   png_read_end(png_handler.png_ptr, png_handler.end_info_ptr);
+
+  // Where read fuzzer finishes
+  // pngget fuzzer starts
+  if (setjmp(png_jmpbuf(png_handler.png_ptr))) {
+    PNG_CLEANUP
+    return 0;
+  }
+  
+  png_uint_32 w  = png_get_image_width (png_handler.png_ptr, png_handler.info_ptr);
+  png_uint_32 h  = png_get_image_height(png_handler.png_ptr, png_handler.info_ptr);
+  png_byte   bd = png_get_bit_depth(png_handler.png_ptr, png_handler.info_ptr);
+  png_byte   ct = png_get_color_type(png_handler.png_ptr, png_handler.info_ptr);
+  
+  if (setjmp(png_jmpbuf(png_handler.png_ptr))) {
+    PNG_CLEANUP
+    return 0;
+  }
+  
+  png_uint_32 w2, h2;
+  int bitd2, coltype2, intr2, comp2, filt2;
+  png_get_IHDR(png_handler.png_ptr, png_handler.info_ptr, &w2, &h2, &bitd2, &coltype2, &intr2, &comp2, &filt2);
+  
+  if (setjmp(png_jmpbuf(png_handler.png_ptr))) {
+    PNG_CLEANUP
+    return 0;
+  }
+  
+  size_t rowb = png_get_rowbytes(png_handler.png_ptr, png_handler.info_ptr);
+  png_byte chans = png_get_channels(png_handler.png_ptr, png_handler.info_ptr);
+  
+  if (setjmp(png_jmpbuf(png_handler.png_ptr))) {
+    PNG_CLEANUP
+    return 0;
+  }
+  
+  png_color_16p bkgd;
+  png_uint_32 has_bkgd = png_get_bKGD(png_handler.png_ptr, png_handler.info_ptr, &bkgd);
+  
+  if (setjmp(png_jmpbuf(png_handler.png_ptr))) {
+    PNG_CLEANUP
+    return 0;
+  }
+  
+  png_bytep trans_alpha;
+  png_color_16p trans_color;
+  int num_trans;
+  png_get_tRNS(png_handler.png_ptr, png_handler.info_ptr, &trans_alpha, &num_trans, &trans_color);
+  
+  if (setjmp(png_jmpbuf(png_handler.png_ptr))) {
+    PNG_CLEANUP
+    return 0;
+  }
+  
+  png_uint_32 res_x, res_y;
+  int unit_type;
+  png_get_pHYs(png_handler.png_ptr, png_handler.info_ptr, &res_x, &res_y, &unit_type);
+  
+  if (setjmp(png_jmpbuf(png_handler.png_ptr))) {
+    PNG_CLEANUP
+    return 0;
+  }
+  
+  #ifdef PNG_TEXT_SUPPORTED
+  png_textp text_ptr;
+  int num_text;
+  png_get_text(png_handler.png_ptr, png_handler.info_ptr,&text_ptr, &num_text);
 
   PNG_CLEANUP
 
