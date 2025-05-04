@@ -223,7 +223,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   png_get_rows(png_handler.png_ptr, png_handler.info_ptr);
   png_get_image_width(png_handler.png_ptr, png_handler.info_ptr);
   png_get_image_height(png_handler.png_ptr, png_handler.info_ptr);
-  png_get_valid(png_handler.png_ptr, png_handler.info_ptr, &flag);
+  png_get_valid(png_handler.png_ptr, png_handler.info_ptr, flag);
   png_get_rowbytes(png_handler.png_ptr, png_handler.info_ptr);
   png_get_rows(png_handler.png_ptr, png_handler.info_ptr);
   png_get_channels(png_handler.png_ptr, png_handler.info_ptr);
