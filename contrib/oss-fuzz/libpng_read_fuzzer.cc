@@ -254,6 +254,69 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     volatile double g = gamma_val;
   }
 
+  // ICC Profile
+  png_charp name;
+  png_charp profile;
+  png_uint_32 proflen;
+  int compression_type;
+  if (png_get_iCCP(png_handler.png_ptr, png_handler.info_ptr, &name, &compression_type, (png_bytepp)&profile, &proflen))
+   {
+  volatile png_charp p = profile;
+  }
+
+  // sRGB Intent
+  int intent;
+  if (png_get_sRGB(png_handler.png_ptr, png_handler.info_ptr, &intent)) {
+  volatile int i = intent;
+  }
+  
+  // Transparency
+  png_bytep trans_alpha;
+  int num_trans;
+  png_color_16p trans_color;
+  if (png_get_tRNS(png_handler.png_ptr, png_handler.info_ptr, &trans_alpha, &num_trans, &trans_color)) {
+  volatile int t = num_trans;
+  }
+
+  // Histogram
+  png_uint_16p hist;
+  if (png_get_hIST(png_handler.png_ptr, png_handler.info_ptr, &hist)) {
+  volatile png_uint_16 h = hist[0];
+  }
+
+  // Chromaticity
+  double wx, wy, rx, ry, gx, gy, bx, by;
+  if (png_get_cHRM(png_handler.png_ptr, png_handler.info_ptr, &wx, &wy, &rx, &ry, &gx, &gy, &bx, &by)) {
+  volatile double dummy = wx;
+  }
+
+  // chromaticity XYZ float values
+  double red_X, red_Y, red_Z, green_X, green_Y, green_Z, blue_X, blue_Y, blue_Z;
+  if (png_get_cHRM_XYZ(png_handler.png_ptr, png_handler.info_ptr,
+    &red_X, &red_Y, &red_Z,
+    &green_X, &green_Y, &green_Z,
+    &blue_X, &blue_Y, &blue_Z)) {
+  volatile double r = red_X;
+  }
+
+  // chromaticity XYZ fixed-point
+  png_fixed_point int_red_X, int_red_Y, int_red_Z;
+  png_fixed_point int_green_X, int_green_Y, int_green_Z;
+  png_fixed_point int_blue_X, int_blue_Y, int_blue_Z;
+  if (png_get_cHRM_XYZ_fixed(png_handler.png_ptr, png_handler.info_ptr,
+    &int_red_X, &int_red_Y, &int_red_Z,
+    &int_green_X, &int_green_Y, &int_green_Z,
+    &int_blue_X, &int_blue_Y, &int_blue_Z)) {
+  volatile png_fixed_point ir = int_red_X;
+  }
+
+  // chromaticity fixed-point values
+  png_fixed_point whiteX, whiteY, redX, redY, greenX, greenY, blueX, blueY;
+  if (png_get_cHRM_fixed(png_handler.png_ptr, png_handler.info_ptr,
+    &whiteX, &whiteY, &redX, &redY, &greenX, &greenY, &blueX, &blueY)) {
+  volatile png_fixed_point wx = whiteX;
+  }
+
   PNG_CLEANUP
 
 #ifdef PNG_SIMPLIFIED_READ_SUPPORTED
