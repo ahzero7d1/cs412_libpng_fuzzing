@@ -192,6 +192,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   png_set_bgr(png_handler.png_ptr);
   png_set_swap(png_handler.png_ptr);
   png_set_invert_mono(png_handler.png_ptr);
+  png_set_strip_alpha(png_handler.png_ptr);
 
   int passes = png_set_interlace_handling(png_handler.png_ptr);
 
@@ -219,6 +220,31 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   png_get_pixel_aspect_ratio(png_handler.png_ptr, png_handler.info_ptr);
   png_get_x_offset_pixels(png_handler.png_ptr, png_handler.info_ptr);
   png_get_y_offset_pixels(png_handler.png_ptr, png_handler.info_ptr);
+  png_get_rows(png_handler.png_ptr, png_handler.info_ptr);
+  png_get_image_width(png_handler.png_ptr, png_handler.info_ptr);
+  png_get_image_height(png_handler.png_ptr, png_handler.info_ptr);
+  png_get_valid(png_handler.png_ptr, png_handler.info_ptr)
+  png_get_rowbytes(png_handler.png_ptr, png_handler.info_ptr)
+  png_get_rows(png_handler.png_ptr, png_handler.info_ptr)
+  png_get_channels(png_handler.png_ptr, png_handler.info_ptr)
+  png_get_image_width(png_handler.png_ptr, png_handler.info_ptr)
+  png_get_image_height(png_handler.png_ptr, png_handler.info_ptr)
+  png_get_bit_depth(png_handler.png_ptr, png_handler.info_ptr)
+  png_get_color_type(png_handler.png_ptr, png_handler.info_ptr)
+  png_get_filter_type(png_handler.png_ptr, png_handler.info_ptr)
+  png_get_interlace_type(png_handler.png_ptr, png_handler.info_ptr)
+  png_get_compression_type(png_handler.png_ptr, png_handler.info_ptr)
+  png_get_pixels_per_meter(png_handler.png_ptr, png_handler.info_ptr)
+  png_get_x_pixels_per_meter(png_handler.png_ptr, png_handler.info_ptr)
+  png_get_y_pixels_per_meter(png_handler.png_ptr, png_handler.info_ptr)
+  png_get_pixel_aspect_ratio(png_handler.png_ptr, png_handler.info_ptr)
+  png_get_pixel_aspect_ratio_fixed(png_handler.png_ptr, png_handler.info_ptr)
+  png_get_x_offset_pixels(png_handler.png_ptr, png_handler.info_ptr)
+  png_get_y_offset_pixels(png_handler.png_ptr, png_handler.info_ptr)
+  png_get_x_offset_microns(png_handler.png_ptr, png_handler.info_ptr)
+  png_get_y_offset_microns(png_handler.png_ptr, png_handler.info_ptr)
+
+
   // png_get_valid(png_handler.png_ptr, png_handler.info_ptr, PNG_INFO_tIME);
   
   png_textp text_ptr;
