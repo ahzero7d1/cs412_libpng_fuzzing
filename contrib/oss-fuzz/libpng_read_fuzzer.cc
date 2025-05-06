@@ -228,6 +228,11 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   volatile png_uint_32 x_ppm = png_get_x_pixels_per_meter(png_handler.png_ptr, png_handler.info_ptr);
   volatile png_uint_32 y_ppm = png_get_y_pixels_per_meter(png_handler.png_ptr, png_handler.info_ptr);
   volatile float aspect = png_get_pixel_aspect_ratio(png_handler.png_ptr, png_handler.info_ptr);
+  volatile png_uint_32 ppm = png_get_pixels_per_meter(png_handler.png_ptr, png_handler.info_ptr);
+  volatile png_fixed_point aspect_fixed = png_get_pixel_aspect_ratio_fixed(png_handler.png_ptr, png_handler.info_ptr);
+  volatile png_int_32 x_offset = png_get_x_offset_microns(png_handler.png_ptr, png_handler.info_ptr);
+  volatile png_int_32 y_offset = png_get_y_offset_microns(png_handler.png_ptr, png_handler.info_ptr);
+
 
   png_bytepp rows = png_get_rows(png_handler.png_ptr, png_handler.info_ptr);
   if (rows) {
@@ -314,6 +319,35 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   if (png_get_cHRM_fixed(png_handler.png_ptr, png_handler.info_ptr,
     &whiteX, &whiteY, &redX, &redY, &greenX, &greenY, &blueX, &blueY)) {
   volatile png_fixed_point wx = whiteX;
+  }
+
+  // sBIT
+  png_color_8p sig_bit;
+  if (png_get_sBIT(png_handler.png_ptr, png_handler.info_ptr, &sig_bit)) {
+    volatile int red_bits = sig_bit->red;
+  }
+
+  // pCAL
+  png_charp purpose, units;
+  png_charpp params;
+  int type, nparams;
+  png_int_32 X0, X1;
+  if (png_get_pCAL(png_handler.png_ptr, png_handler.info_ptr,
+    &purpose, &X0, &X1, &type, &nparams, &units, &params)) {
+      volatile int t = type;
+  }
+
+  // sCAL (floating point version)
+  int unit;
+  double scal_width, scal_height;
+  if (png_get_sCAL(png_handler.png_ptr, png_handler.info_ptr, &unit, &scal_width, &scal_height)) {
+    volatile double sw = scal_width;
+  }
+
+  // sCAL (string version)
+  png_charp scal_width_str, scal_height_str;
+  if (png_get_sCAL_s(png_handler.png_ptr, png_handler.info_ptr, &unit, &scal_width_str, &scal_height_str)) {
+    volatile png_charp s = scal_width_str;
   }
 
   PNG_CLEANUP
