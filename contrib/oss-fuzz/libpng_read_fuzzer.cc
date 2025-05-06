@@ -97,6 +97,134 @@ static const int kPngHeaderSize = 8;
 // Entry point for LibFuzzer.
 // Roughly follows the libpng book example:
 // http://www.libpng.org/pub/png/book/chapter13.html
+// ... [unchanged headers, structs, memory setup] ...
+
+extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
+  if (size < kPngHeaderSize) return 0;
+  std::vector<unsigned char> v(data, data + size);
+  if (png_sig_cmp(v.data(), 0, kPngHeaderSize)) return 0;
+
+  PngObjectHandler png_handler;
+
+  png_handler.png_ptr = png_create_read_struct(PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
+  if (!png_handler.png_ptr) return 0;
+
+  png_handler.info_ptr = png_create_info_struct(png_handler.png_ptr);
+  if (!png_handler.info_ptr) {
+    PNG_CLEANUP
+    return 0;
+  }
+
+  png_handler.end_info_ptr = png_create_info_struct(png_handler.png_ptr);
+  if (!png_handler.end_info_ptr) {
+    PNG_CLEANUP
+    return 0;
+  }
+
+  png_set_mem_fn(png_handler.png_ptr, nullptr, limited_malloc, default_free);
+  png_set_crc_action(png_handler.png_ptr, PNG_CRC_QUIET_USE, PNG_CRC_QUIET_USE);
+
+#ifdef PNG_IGNORE_ADLER32
+  png_set_option(png_handler.png_ptr, PNG_IGNORE_ADLER32, PNG_OPTION_ON);
+#endif
+
+  png_handler.buf_state = new BufState{ data + kPngHeaderSize, size - kPngHeaderSize };
+  png_set_read_fn(png_handler.png_ptr, png_handler.buf_state, user_read_data);
+  png_set_sig_bytes(png_handler.png_ptr, kPngHeaderSize);
+
+  if (setjmp(png_jmpbuf(png_handler.png_ptr))) {
+    PNG_CLEANUP
+    return 0;
+  }
+
+  png_read_info(png_handler.png_ptr, png_handler.info_ptr);
+
+  // === Add many transform functions ===
+  png_set_gray_to_rgb(png_handler.png_ptr);
+  png_set_rgb_to_gray_fixed(png_handler.png_ptr, 1, -1, -1);
+  png_set_expand(png_handler.png_ptr);             // expand paletted images to RGB
+  png_set_palette_to_rgb(png_handler.png_ptr);     // explicit palette to RGB
+  png_set_tRNS_to_alpha(png_handler.png_ptr);      // transparency chunk
+  png_set_packing(png_handler.png_ptr);            // 1/2/4-bit to 8-bit
+  png_set_filler(png_handler.png_ptr, 0xFF, PNG_FILLER_AFTER);
+  png_set_swap(png_handler.png_ptr);               // byte-order swap
+  png_set_bgr(png_handler.png_ptr);                // RGB to BGR
+  png_set_invert_alpha(png_handler.png_ptr);
+  png_set_invert_mono(png_handler.png_ptr);
+  png_set_user_limits(png_handler.png_ptr, 8192, 8192); // width, height limits
+
+#ifdef PNG_READ_BACKGROUND_SUPPORTED
+  png_color_16 bg = { 0, 0x80, 0x80, 0x80, 0 };
+  png_set_background(png_handler.png_ptr, &bg, PNG_BACKGROUND_GAMMA_FILE, 1, 1.0);
+#endif
+
+#ifdef PNG_READ_GAMMA_SUPPORTED
+  png_set_gamma(png_handler.png_ptr, 2.2, 1.0);
+#endif
+
+  int passes = png_set_interlace_handling(png_handler.png_ptr);
+  png_read_update_info(png_handler.png_ptr, png_handler.info_ptr);
+
+  png_uint_32 width, height;
+  int bit_depth, color_type, interlace_type, compression_type, filter_type;
+  if (!png_get_IHDR(png_handler.png_ptr, png_handler.info_ptr,
+                    &width, &height, &bit_depth, &color_type,
+                    &interlace_type, &compression_type, &filter_type)) {
+    PNG_CLEANUP
+    return 0;
+  }
+
+  if (width && height > 100000000 / width) {
+    PNG_CLEANUP
+    return 0;
+  }
+
+  png_handler.row_ptr = png_malloc(png_handler.png_ptr,
+    png_get_rowbytes(png_handler.png_ptr, png_handler.info_ptr));
+
+  for (int pass = 0; pass < passes; ++pass) {
+    for (png_uint_32 y = 0; y < height; ++y) {
+      png_read_row(png_handler.png_ptr,
+        static_cast<png_bytep>(png_handler.row_ptr), nullptr);
+    }
+  }
+
+  // === Add more metadata reads ===
+  png_color_8p sig_bit;
+  png_get_sBIT(png_handler.png_ptr, png_handler.info_ptr, &sig_bit);
+
+  png_textp text_ptr;
+  int num_text;
+  png_get_text(png_handler.png_ptr, png_handler.info_ptr, &text_ptr, &num_text);
+
+  double gamma;
+  if (png_get_gAMA(png_handler.png_ptr, png_handler.info_ptr, &gamma)) {
+    // optional gamma logic
+  }
+
+  png_bytep trans_alpha = nullptr;
+  int num_trans = 0;
+  png_color_16p trans_color = nullptr;
+  png_get_tRNS(png_handler.png_ptr, png_handler.info_ptr, &trans_alpha, &num_trans, &trans_color);
+
+  png_read_end(png_handler.png_ptr, png_handler.end_info_ptr);
+  PNG_CLEANUP
+
+#ifdef PNG_SIMPLIFIED_READ_SUPPORTED
+  png_image image;
+  memset(&image, 0, sizeof image);
+  image.version = PNG_IMAGE_VERSION;
+
+  if (png_image_begin_read_from_memory(&image, data, size)) {
+    image.format = PNG_FORMAT_RGBA;
+    std::vector<png_byte> buffer(PNG_IMAGE_SIZE(image));
+    png_image_finish_read(&image, nullptr, buffer.data(), 0, nullptr);
+  }
+#endif
+
+  return 0;
+}
+/*
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   if (size < kPngHeaderSize) {
     return 0;
@@ -221,3 +349,4 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 
   return 0;
 }
+*/
