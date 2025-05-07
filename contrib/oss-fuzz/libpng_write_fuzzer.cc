@@ -79,6 +79,8 @@ void default_free(png_structp png_ptr, png_voidp ptr) {
 }
 
 // Entry point for LibFuzzer.
+// Roughly follows the libpng book example:
+// http://www.libpng.org/pub/png/book/chapter15.html
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   if (size < 16) {
     return 0; // Not enough data to construct even minimal header.
