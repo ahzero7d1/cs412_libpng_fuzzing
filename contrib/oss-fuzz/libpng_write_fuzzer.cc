@@ -75,7 +75,7 @@ struct PngObjectHandler {
       png_destroy_read_struct(&png_ptr, &info_ptr, nullptr);
     else
       png_destroy_read_struct(&png_ptr, nullptr, nullptr);
-    delete buf_state;
+    delete write_buf;
   }
 };
 
