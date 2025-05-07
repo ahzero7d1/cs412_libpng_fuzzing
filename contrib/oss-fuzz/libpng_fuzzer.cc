@@ -21,6 +21,13 @@
 #define PNG_INTERNAL
 #include "png.h"
 
+#undef png_create_write_struct
+#undef png_set_write_fn
+#undef png_write_info
+#undef png_write_row
+#undef png_write_end
+#undef png_destroy_write_struct
+
 #define PNG_CLEANUP_READ                                                \
   if(png_handler.png_ptr) {                                             \
     if (png_handler.row_ptr)                                            \
