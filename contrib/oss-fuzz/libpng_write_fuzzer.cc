@@ -143,12 +143,20 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   png_handler.write_buf = new WriteBuffer();
 
   png_handler.png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
-  if (!png_handler.png_ptr) return 0;
+  if (!png_handler.png_ptr) {
+    return 0;
+  }
 
   png_handler.info_ptr = png_create_info_struct(png_handler.png_ptr);
-  if (!png_handler.info_ptr) return 0;
-
-  if (setjmp(png_jmpbuf(png_handler.png_ptr))) return 0;
+  if (!png_handler.info_ptr) {
+    PNG_CLEANUP
+    return 0;
+  }
+  
+  if (setjmp(png_jmpbuf(png_handler.png_ptr))) {
+    PNG_CLEANUP
+    return 0;
+  }
 
   png_set_write_fn(png_handler.png_ptr, png_handler.write_buf, user_write_data, user_flush_data);
   png_set_IHDR(png_handler.png_ptr, png_handler.info_ptr, width, height,
@@ -166,6 +174,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   png_write_image(png_handler.png_ptr, row_ptrs.data());
   png_write_end(png_handler.png_ptr, nullptr);
 
+  PNG_CLEANUP
   return 0;
 }
 
