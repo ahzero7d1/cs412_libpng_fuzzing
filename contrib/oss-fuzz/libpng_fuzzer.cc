@@ -12,106 +12,284 @@
 // 4. adding read_end_info() and creating an end_info structure.
 // 5. adding calls to png_set_*() transforms commonly used by browsers.
 
-// png_read_write_fuzzer.cc
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+
 #include <vector>
 
-#define PNG_NO_PREFIX
+#define PNG_INTERNAL
 #include "png.h"
 
-// A trivial progressive-read callback suite:
-static void prog_info_fn(png_structp png, png_infop info) {}
-static void prog_row_fn(png_structp png, png_bytep row, png_uint_32 y, int pass) {}
-static void prog_end_fn(png_structp png, png_infop info) {}
+#define PNG_CLEANUP \
+  if(png_handler.png_ptr) \
+  { \
+    if (png_handler.row_ptr) \
+      png_free(png_handler.png_ptr, png_handler.row_ptr); \
+    if (png_handler.end_info_ptr) \
+      png_destroy_read_struct(&png_handler.png_ptr, &png_handler.info_ptr,\
+        &png_handler.end_info_ptr); \
+    else if (png_handler.info_ptr) \
+      png_destroy_read_struct(&png_handler.png_ptr, &png_handler.info_ptr,\
+        nullptr); \
+    else \
+      png_destroy_read_struct(&png_handler.png_ptr, nullptr, nullptr); \
+    png_handler.png_ptr = nullptr; \
+    png_handler.row_ptr = nullptr; \
+    png_handler.info_ptr = nullptr; \
+    png_handler.end_info_ptr = nullptr; \
+  }
 
+// Progressive-read callbacks
+static void prog_info_fn(png_structp png_ptr, png_infop info_ptr) {
+  // no-op
+}
+static void prog_row_fn(png_structp png_ptr, png_bytep row,
+                        png_uint_32 y, int pass) {
+  // no-op
+}
+static void prog_end_fn(png_structp png_ptr, png_infop info_ptr) {
+  // no-op
+}
+
+// minimal in-memory write buffer and write function
+struct MemBuf {
+  uint8_t *buf;
+  size_t   capacity;
+  size_t   used;
+};
+
+static void write_data_fn(png_structp png_ptr,
+                          png_bytep data, png_size_t length) {
+  MemBuf* m = (MemBuf*)png_get_io_ptr(png_ptr);
+  if (m->used + length <= m->capacity) {
+    memcpy(m->buf + m->used, data, length);
+  }
+  m->used += length;
+}
+
+
+struct BufState {
+  const uint8_t* data;
+  size_t bytes_left;
+};
+
+struct PngObjectHandler {
+  png_infop info_ptr = nullptr;
+  png_structp png_ptr = nullptr;
+  png_infop end_info_ptr = nullptr;
+  png_voidp row_ptr = nullptr;
+  BufState* buf_state = nullptr;
+
+  ~PngObjectHandler() {
+    if (row_ptr)
+      png_free(png_ptr, row_ptr);
+    if (end_info_ptr)
+      png_destroy_read_struct(&png_ptr, &info_ptr, &end_info_ptr);
+    else if (info_ptr)
+      png_destroy_read_struct(&png_ptr, &info_ptr, nullptr);
+    else
+      png_destroy_read_struct(&png_ptr, nullptr, nullptr);
+    delete buf_state;
+  }
+};
+
+void user_read_data(png_structp png_ptr, png_bytep data, size_t length) {
+  BufState* buf_state = static_cast<BufState*>(png_get_io_ptr(png_ptr));
+  if (length > buf_state->bytes_left) {
+    png_error(png_ptr, "read error");
+  }
+  memcpy(data, buf_state->data, length);
+  buf_state->bytes_left -= length;
+  buf_state->data += length;
+}
+
+void* limited_malloc(png_structp, png_alloc_size_t size) {
+  // libpng may allocate large amounts of memory that the fuzzer reports as
+  // an error. In order to silence these errors, make libpng fail when trying
+  // to allocate a large amount. This allocator used to be in the Chromium
+  // version of this fuzzer.
+  // This number is chosen to match the default png_user_chunk_malloc_max.
+  if (size > 8000000)
+    return nullptr;
+
+  return malloc(size);
+}
+
+void default_free(png_structp, png_voidp ptr) {
+  return free(ptr);
+}
+
+static const int kPngHeaderSize = 8;
+
+// Entry point for LibFuzzer.
+// Roughly follows the libpng book example:
+// http://www.libpng.org/pub/png/book/chapter13.html
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
-  const size_t kSigBytes = 8;
-  if (size < kSigBytes) return 0;
-  // Check PNG signature
-  if (png_sig_cmp((png_const_bytep)data, 0, kSigBytes)) return 0;
-
-  // --- Progressive read setup ---
-  png_structp read_ptr = png_create_read_struct(
-      PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
-  if (!read_ptr) return 0;
-  png_infop read_info = png_create_info_struct(read_ptr);
-  if (!read_info) {
-    png_destroy_read_struct(&read_ptr, nullptr, nullptr);
-    return 0;
-  }
-  png_infop read_end = png_create_info_struct(read_ptr);
-  if (!read_end) {
-    png_destroy_read_struct(&read_ptr, &read_info, nullptr);
-    return 0;
-  }
-  if (setjmp(png_jmpbuf(read_ptr))) {
-    png_destroy_read_struct(&read_ptr, &read_info, &read_end);
+  if (size < kPngHeaderSize) {
     return 0;
   }
 
-  // Hook up progressive reader
-  png_set_progressive_read_fn(read_ptr, nullptr,
-                              prog_info_fn, prog_row_fn, prog_end_fn);
-  // Feed all the data after the signature
-  png_process_data(read_ptr, read_info, (png_bytep)(data + kSigBytes),
-                   size - kSigBytes);
-
-  // --- Minimal write path ---
-  // Create a write struct
-  png_structp write_ptr = png_create_write_struct(
-      PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
-  if (!write_ptr) {
-    png_destroy_read_struct(&read_ptr, &read_info, &read_end);
-    return 0;
-  }
-  png_infop write_info = png_create_info_struct(write_ptr);
-  if (!write_info) {
-    png_destroy_write_struct(&write_ptr, nullptr);
-    png_destroy_read_struct(&read_ptr, &read_info, &read_end);
-    return 0;
-  }
-  if (setjmp(png_jmpbuf(write_ptr))) {
-    png_destroy_write_struct(&write_ptr, &write_info);
-    png_destroy_read_struct(&read_ptr, &read_info, &read_end);
+  std::vector<unsigned char> v(data, data + size);
+  if (png_sig_cmp(v.data(), 0, kPngHeaderSize)) {
+    // not a PNG.
     return 0;
   }
 
-  // Declare a 1×1 gray-scale image
-  png_set_IHDR(write_ptr, write_info,
-               /*width=*/1, /*height=*/1,
-               /*bit_depth=*/8,
-               /*color_type=*/PNG_COLOR_TYPE_GRAY,
-               /*interlace=*/PNG_INTERLACE_NONE,
-               /*compression=*/PNG_COMPRESSION_TYPE_BASE,
-               /*filter=*/PNG_FILTER_TYPE_BASE);
+  PngObjectHandler png_handler;
+  png_handler.png_ptr = nullptr;
+  png_handler.row_ptr = nullptr;
+  png_handler.info_ptr = nullptr;
+  png_handler.end_info_ptr = nullptr;
 
-  // A tiny in-memory buffer for output
-  struct MemBuf { uint8_t *buf; size_t  sz, used; };
-  MemBuf mb = { (uint8_t*)malloc(128), 128, 0 };
+  png_handler.png_ptr = png_create_read_struct
+    (PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
+  if (!png_handler.png_ptr) {
+    return 0;
+  }
 
-  // Custom write-fn that appends into our MemBuf
-  auto write_data = [](png_structp png, png_bytep data, png_size_t len) {
-    MemBuf* m = (MemBuf*)png_get_io_ptr(png);
-    if (m->used + len <= m->sz) {
-      memcpy(m->buf + m->used, data, len);
+  png_handler.info_ptr = png_create_info_struct(png_handler.png_ptr);
+  if (!png_handler.info_ptr) {
+    PNG_CLEANUP
+    return 0;
+  }
+
+  png_handler.end_info_ptr = png_create_info_struct(png_handler.png_ptr);
+  if (!png_handler.end_info_ptr) {
+    PNG_CLEANUP
+    return 0;
+  }
+
+  // Use a custom allocator that fails for large allocations to avoid OOM.
+  png_set_mem_fn(png_handler.png_ptr, nullptr, limited_malloc, default_free);
+
+  png_set_crc_action(png_handler.png_ptr, PNG_CRC_QUIET_USE, PNG_CRC_QUIET_USE);
+#ifdef PNG_IGNORE_ADLER32
+  png_set_option(png_handler.png_ptr, PNG_IGNORE_ADLER32, PNG_OPTION_ON);
+#endif
+
+  // Setting up reading from buffer.
+  png_handler.buf_state = new BufState();
+  png_handler.buf_state->data = data + kPngHeaderSize;
+  png_handler.buf_state->bytes_left = size - kPngHeaderSize;
+  png_set_read_fn(png_handler.png_ptr, png_handler.buf_state, user_read_data);
+  png_set_sig_bytes(png_handler.png_ptr, kPngHeaderSize);
+
+  if (setjmp(png_jmpbuf(png_handler.png_ptr))) {
+    PNG_CLEANUP
+    return 0;
+  }
+
+  // Reading.
+  png_read_info(png_handler.png_ptr, png_handler.info_ptr);
+
+  // reset error handler to put png_deleter into scope.
+  if (setjmp(png_jmpbuf(png_handler.png_ptr))) {
+    PNG_CLEANUP
+    return 0;
+  }
+
+  png_uint_32 width, height;
+  int bit_depth, color_type, interlace_type, compression_type;
+  int filter_type;
+
+  if (!png_get_IHDR(png_handler.png_ptr, png_handler.info_ptr, &width,
+                    &height, &bit_depth, &color_type, &interlace_type,
+                    &compression_type, &filter_type)) {
+    PNG_CLEANUP
+    return 0;
+  }
+
+  // This is going to be too slow.
+  if (width && height > 100000000 / width) {
+    PNG_CLEANUP
+    return 0;
+  }
+
+  // Set several transforms that browsers typically use:
+  png_set_gray_to_rgb(png_handler.png_ptr);
+  png_set_expand(png_handler.png_ptr);
+  png_set_packing(png_handler.png_ptr);
+  png_set_scale_16(png_handler.png_ptr);
+  png_set_tRNS_to_alpha(png_handler.png_ptr);
+
+  int passes = png_set_interlace_handling(png_handler.png_ptr);
+
+  png_read_update_info(png_handler.png_ptr, png_handler.info_ptr);
+
+  png_handler.row_ptr = png_malloc(
+      png_handler.png_ptr, png_get_rowbytes(png_handler.png_ptr,
+                                            png_handler.info_ptr));
+
+  for (int pass = 0; pass < passes; ++pass) {
+    for (png_uint_32 y = 0; y < height; ++y) {
+      png_read_row(png_handler.png_ptr,
+                   static_cast<png_bytep>(png_handler.row_ptr), nullptr);
     }
-    m->used += len;
-  };
-  png_set_write_fn(write_ptr, &mb, write_data, /*flush=*/nullptr);
+  }
+  
+  png_read_end(png_handler.png_ptr, png_handler.end_info_ptr);
 
-  png_write_info(write_ptr, write_info);
-  // one empty row of 1 byte
-  png_bytep row = (png_bytep)malloc(1);
-  png_write_row(write_ptr, row);
-  png_write_end(write_ptr, write_info);
+  // progressive read
+  {
+    png_structp p = png_create_read_struct(
+        PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
+    if (p) {
+      png_infop info = png_create_info_struct(p);
+      png_infop end  = png_create_info_struct(p);
+      if (info && end) {
+        if (!setjmp(png_jmpbuf(p))) {
+          png_set_progressive_read_fn(
+            p, nullptr,
+            prog_info_fn,
+            prog_row_fn,
+            prog_end_fn);
+          png_process_data(
+            p, info,
+            const_cast<png_bytep>(data + kPngHeaderSize),
+            size - kPngHeaderSize);
+        }
+      }
+      png_destroy_read_struct(&p, info ? &info : nullptr, end ? &end : nullptr);
+    }
+  }
 
-  free(row);
-  free(mb.buf);
-  png_destroy_write_struct(&write_ptr, &write_info);
-  png_destroy_read_struct(&read_ptr, &read_info, &read_end);
+  // pngwrite
+  {
+    png_structp wp = png_create_write_struct(
+        PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
+    if (wp) {
+      png_infop wi = png_create_info_struct(wp);
+      if (wi && !setjmp(png_jmpbuf(wp))) {
+        // allocate small buffer
+        MemBuf mb;
+        mb.capacity = 1024;
+        mb.used     = 0;
+        mb.buf      = (uint8_t*)malloc(mb.capacity);
 
+        png_set_write_fn(wp, &mb,
+                         write_data_fn,
+                         /*flush=*/nullptr);
+
+        // write a trivial 1×1 grayscale PNG
+        png_set_IHDR(wp, wi,
+                     1, 1, 8,
+                     PNG_COLOR_TYPE_GRAY,
+                     PNG_INTERLACE_NONE,
+                     PNG_COMPRESSION_TYPE_BASE,
+                     PNG_FILTER_TYPE_BASE);
+        png_write_info(wp, wi);
+
+        png_bytep row = (png_bytep)malloc(1);
+        png_write_row(wp, row);
+        free(row);
+
+        png_write_end(wp, wi);
+        free(mb.buf);
+      }
+      png_destroy_write_struct(&wp, wi ? &wi : nullptr);
+    }
+  }
   return 0;
 }
