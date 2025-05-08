@@ -159,7 +159,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   // Time (use part of input data)
   if (size > 14 && data[13] > 0) { // Use byte 14 as a flag
       png_time modtime;
-      png_convert_from_time_t(&modtime, time(NULL)); // Use current time
+    //   png_convert_from_time_t(&modtime, time(NULL)); // Use current time
       png_set_tIME(png_handler.png_ptr, png_handler.info_ptr, &modtime);
   }
 
