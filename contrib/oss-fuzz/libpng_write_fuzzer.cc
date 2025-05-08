@@ -39,17 +39,25 @@ void* limited_malloc(png_structp, png_alloc_size_t size) {
 void default_free(png_structp, png_voidp ptr) {
   return free(ptr);
 }
-
+struct BufState {
+  const uint8_t* data;
+  size_t bytes_left;
+};
 // Structure to hold libpng pointers and manage cleanup
 struct PngObjectHandler {
   png_structp png_ptr = nullptr;
   png_infop info_ptr = nullptr;
+  png_voidp row_ptr = nullptr;
+  BufState* buf_state = nullptr;
 
   ~PngObjectHandler() {
-    if (png_ptr) {
-      // Use png_destroy_write_struct for cleanup
+    if (row_ptr)
+      png_free(png_ptr, row_ptr);
+    if (info_ptr)
       png_destroy_write_struct(&png_ptr, &info_ptr);
-    }
+    else
+      png_destroy_write_struct(&png_ptr, nullptr);
+    delete buf_state;
   }
 };
 
@@ -159,7 +167,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   // Time (use part of input data)
   if (size > 14 && data[13] > 0) { // Use byte 14 as a flag
       png_time modtime;
-    //   png_convert_from_time_t(&modtime, time(NULL)); // Use current time
+      png_convert_from_time_t(&modtime, time(NULL)); // Use current time
       png_set_tIME(png_handler.png_ptr, png_handler.info_ptr, &modtime);
   }
 
