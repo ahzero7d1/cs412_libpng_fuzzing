@@ -59,6 +59,7 @@ struct PngObjectHandler {
     if (end_info_ptr)
       png_destroy_read_struct(&png_ptr, &info_ptr, &end_info_ptr);
     else if (info_ptr)
+      png_destroy_write_struct(&png_ptr, &info_ptr);
       png_destroy_read_struct(&png_ptr, &info_ptr, nullptr);
     else
       png_destroy_read_struct(&png_ptr, nullptr, nullptr);
