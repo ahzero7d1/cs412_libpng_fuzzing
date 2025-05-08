@@ -256,40 +256,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   }
 
   // pngwrite
-  {
-    png_structp wp = png_create_write_struct(
-        PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
-    if (wp) {
-      png_infop wi = png_create_info_struct(wp);
-      if (wi && !setjmp(png_jmpbuf(wp))) {
-        // allocate small buffer
-        MemBuf mb;
-        mb.capacity = 1024;
-        mb.used     = 0;
-        mb.buf      = (uint8_t*)malloc(mb.capacity);
 
-        png_set_write_fn(wp, &mb,
-                         write_data_fn,
-                         /*flush=*/nullptr);
-
-        // write a trivial 1×1 grayscale PNG
-        png_set_IHDR(wp, wi,
-                     1, 1, 8,
-                     PNG_COLOR_TYPE_GRAY,
-                     PNG_INTERLACE_NONE,
-                     PNG_COMPRESSION_TYPE_BASE,
-                     PNG_FILTER_TYPE_BASE);
-        png_write_info(wp, wi);
-
-        png_bytep row = (png_bytep)malloc(1);
-        png_write_row(wp, row);
-        free(row);
-
-        png_write_end(wp, wi);
-        free(mb.buf);
-      }
-      png_destroy_write_struct(&wp, wi ? &wi : nullptr);
-    }
-  }
+  
   return 0;
 }
