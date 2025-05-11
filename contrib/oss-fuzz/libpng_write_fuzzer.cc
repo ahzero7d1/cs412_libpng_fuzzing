@@ -168,7 +168,7 @@ static void read_cb(png_structp png_ptr, png_bytep dst, size_t len)
 }
 
 /* Discard encoder output (we only care about exercising the code paths) ---- */
-static void write_cb(png_structp, png_bytep, size_t) 
+static void write_cb(png_structp png_ptr, png_bytep data, png_size_t length) 
 {
     WriteBuffer* buf = static_cast<WriteBuffer*>(png_get_io_ptr(png_ptr));
     buf->data.insert(buf->data.end(), data, data + length);
