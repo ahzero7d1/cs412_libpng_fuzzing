@@ -21,13 +21,13 @@
   { \
     if (png_handler.row_ptr) \
       png_free(png_handler.png_ptr, png_handler.row_ptr); \
-    if (info_ptr) { \
-      png_destroy_read_struct (&png_ptr, &info_ptr, nullptr); \
-      png_destroy_write_struct(&png_ptr, &info_ptr); \
+    if (png_handler.info_ptr) { \
+      png_destroy_read_struct (&png_handler.png_ptr, &png_handler.info_ptr, nullptr); \
+      png_destroy_write_struct(&png_handler.png_ptr, &png_handler.info_ptr); \
     } \
     else { \
-      png_destroy_read_struct (&png_ptr, nullptr, nullptr); \
-      png_destroy_write_struct(&png_ptr, nullptr); \
+      png_destroy_read_struct (&png_handler.png_ptr, nullptr, nullptr); \
+      png_destroy_write_struct(&png_handler.png_ptr, nullptr); \
     } \
     png_handler.png_ptr = nullptr; \
     png_handler.row_ptr = nullptr; \
