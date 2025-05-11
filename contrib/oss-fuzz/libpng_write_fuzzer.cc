@@ -187,42 +187,64 @@ void default_free(png_structp png_ptr, png_voidp ptr) {
 //   return 0;
 // }
 
-extern "C" int LLVMFuzzerTestOneInput(const uint8_t* f_data, size_t f_size) {
+extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
+    /* libpng needs at least an 8-byte signature.  Zero-length inputs add no value. */
+    if (size < 8)
+        return 0;
 
-    FILE *in_file = fmemopen((void *)f_data, f_size, "rb");
-    FILE *out_file = fopen("output_file", "wb");
+    FILE* in_file  = fmemopen((void*)data, size, "rb");
+    if (!in_file)                       /* fmemopen() can fail */
+        return 0;
 
-    // Create libpng read and write structures
-    png_structp read_ptr = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
-    png_structp write_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
-
-
-    png_infop info_ptr = png_create_info_struct(read_ptr);
-
-
-    // Set up error handling
-    if (setjmp(png_jmpbuf(read_ptr))) {
-        png_destroy_read_struct(&read_ptr, &info_ptr, NULL);
-        png_destroy_write_struct(&write_ptr, NULL);
+    FILE* out_file = tmpfile();         /* safer than writing to a fixed path */
+    if (!out_file) {
         fclose(in_file);
-        fclose(out_file);
-	    return 0;
+        return 0;
     }
 
-    // Set up the input/output functions
-    png_set_read_fn(read_ptr, (png_voidp)in_file, [](png_structp png_ptr, png_bytep data, size_t size){
-        fread(data, 1, size, (FILE *)png_get_io_ptr(png_ptr));
-    });
+    png_structp read_ptr  = png_create_read_struct(PNG_LIBPNG_VER_STRING,
+                                                   nullptr, nullptr, nullptr);
+    png_structp write_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING,
+                                                    nullptr, nullptr, nullptr);
+    if (!read_ptr || !write_ptr) {
+        if (read_ptr)  png_destroy_read_struct (&read_ptr , nullptr, nullptr);
+        if (write_ptr) png_destroy_write_struct(&write_ptr, nullptr);
+        fclose(in_file);
+        fclose(out_file);
+        return 0;
+    }
 
-    png_set_write_fn(write_ptr, (png_voidp)out_file, [](png_structp png_ptr, png_bytep data, size_t size){
-        fwrite(data, 1, size, (FILE *)png_get_io_ptr(png_ptr));
-    }, NULL);
-    
-    // Read the PNG data
-    png_read_png(read_ptr, info_ptr, PNG_TRANSFORM_IDENTITY, NULL);
+    png_infop info_ptr = png_create_info_struct(read_ptr);
+    if (!info_ptr) {                             /* extremely unlikely */
+        png_destroy_read_struct(&read_ptr, nullptr, nullptr);
+        png_destroy_write_struct(&write_ptr, nullptr);
+        fclose(in_file);
+        fclose(out_file);
+        return 0;
+    }
 
-    // Write the PNG data
-    png_write_png(write_ptr, info_ptr, 0x7089, NULL);
+    /* libpng’s normal error-handling mechanism */
+    if (setjmp(png_jmpbuf(read_ptr))) {
+        png_destroy_read_struct (&read_ptr , &info_ptr, nullptr);
+        png_destroy_write_struct(&write_ptr, nullptr);
+        fclose(in_file);
+        fclose(out_file);
+        return 0;
+    }
+
+    /* Use the simple built-in I/O instead of a custom callback */
+    png_init_io(read_ptr , in_file );
+    png_init_io(write_ptr, out_file);
+
+    png_read_png (read_ptr , info_ptr, PNG_TRANSFORM_IDENTITY, nullptr);
+    png_write_png(write_ptr, info_ptr, PNG_TRANSFORM_IDENTITY, nullptr);
+
+    png_destroy_read_struct (&read_ptr , &info_ptr, nullptr);
+    png_destroy_write_struct(&write_ptr, nullptr);
+    fclose(in_file);
+    fclose(out_file);
+	
+    PNG_CLEANUP
     return 0;
 }
 
