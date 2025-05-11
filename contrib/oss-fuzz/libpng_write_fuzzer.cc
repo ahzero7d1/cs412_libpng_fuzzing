@@ -10,6 +10,8 @@
 #include <string.h>
 
 #include <vector>
+#include <fstream>
+#include <iostream>
 
 #define PNG_INTERNAL
 #include "png.h"
@@ -30,6 +32,57 @@
     png_handler.info_ptr = nullptr; \
     png_handler.end_info_ptr = nullptr; \
   }
+
+
+#define TEXT_TITLE    0x01
+#define TEXT_AUTHOR   0x02
+#define TEXT_DESC     0x04
+#define TEXT_COPY     0x08
+#define TEXT_EMAIL    0x10
+#define TEXT_URL      0x20
+
+#define TEXT_TITLE_OFFSET        0
+#define TEXT_AUTHOR_OFFSET      72
+#define TEXT_COPY_OFFSET     (2*72)
+#define TEXT_EMAIL_OFFSET    (3*72)
+#define TEXT_URL_OFFSET      (4*72)
+#define TEXT_DESC_OFFSET     (5*72)
+
+typedef unsigned char   uch;
+typedef unsigned short  ush;
+typedef unsigned long   ulg;
+
+
+typedef struct _mainprog_info {
+    double gamma;
+    long width;
+    long height;
+    time_t modtime;
+    FILE *infile;
+    FILE *outfile;
+    void *png_ptr;
+    void *info_ptr;
+    uch *image_data;
+    uch **row_pointers;
+    char *title;
+    char *author;
+    char *desc;
+    char *copyright;
+    char *email;
+    char *url;
+    int filter;    /* command-line-filter flag, not PNG row filter! */
+    int pnmtype;
+    int sample_depth;
+    int interlaced;
+    int have_bg;
+    int have_time;
+    int have_text;
+    jmp_buf jmpbuf;
+    uch bg_red;
+    uch bg_green;
+    uch bg_blue;
+} mainprog_info;
+
 
 struct WriteBuffer {
   std::vector<uint8_t> data;
@@ -83,104 +136,94 @@ void default_free(png_structp png_ptr, png_voidp ptr) {
 }
 
 
-#define TEXT_TITLE    0x01
-#define TEXT_AUTHOR   0x02
-#define TEXT_DESC     0x04
-#define TEXT_COPY     0x08
-#define TEXT_EMAIL    0x10
-#define TEXT_URL      0x20
-
-#define TEXT_TITLE_OFFSET        0
-#define TEXT_AUTHOR_OFFSET      72
-#define TEXT_COPY_OFFSET     (2*72)
-#define TEXT_EMAIL_OFFSET    (3*72)
-#define TEXT_URL_OFFSET      (4*72)
-#define TEXT_DESC_OFFSET     (5*72)
-
-typedef unsigned char   uch;
-typedef unsigned short  ush;
-typedef unsigned long   ulg;
-
-typedef struct _mainprog_info {
-    double gamma;
-    long width;
-    long height;
-    time_t modtime;
-    FILE *infile;
-    FILE *outfile;
-    void *png_ptr;
-    void *info_ptr;
-    uch *image_data;
-    uch **row_pointers;
-    char *title;
-    char *author;
-    char *desc;
-    char *copyright;
-    char *email;
-    char *url;
-    int filter;    /* command-line-filter flag, not PNG row filter! */
-    int pnmtype;
-    int sample_depth;
-    int interlaced;
-    int have_bg;
-    int have_time;
-    int have_text;
-    jmp_buf jmpbuf;
-    uch bg_red;
-    uch bg_green;
-    uch bg_blue;
-} mainprog_info;
-
-
 // Entry point for LibFuzzer.
 // Roughly follows the libpng book example:
 // http://www.libpng.org/pub/png/book/chapter15.html
-extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
-  if (size < 16) return 0;
+// extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
+//   if (size < 16) return 0;
 
-  uint32_t width = (data[0] << 8) | data[1];
-  uint32_t height = (data[2] << 8) | data[3];
-  int bit_depth = 8;
-  int color_type = PNG_COLOR_TYPE_RGBA;
-  if (width == 0 || height == 0 || width > 1024 || height > 1024) return 0;
+//   uint32_t width = (data[0] << 8) | data[1];
+//   uint32_t height = (data[2] << 8) | data[3];
+//   int bit_depth = 8;
+//   int color_type = PNG_COLOR_TYPE_RGBA;
+//   if (width == 0 || height == 0 || width > 1024 || height > 1024) return 0;
 
-  PngObjectHandler png_handler;
-  png_handler.write_buf = new WriteBuffer();
+//   PngObjectHandler png_handler;
+//   png_handler.write_buf = new WriteBuffer();
 
-  png_handler.png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
-  if (!png_handler.png_ptr) {
-    return 0;
-  }
+//   png_handler.png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
+//   if (!png_handler.png_ptr) {
+//     return 0;
+//   }
 
-  png_handler.info_ptr = png_create_info_struct(png_handler.png_ptr);
-  if (!png_handler.info_ptr) {
-    PNG_CLEANUP
-    return 0;
-  }
+//   png_handler.info_ptr = png_create_info_struct(png_handler.png_ptr);
+//   if (!png_handler.info_ptr) {
+//     PNG_CLEANUP
+//     return 0;
+//   }
   
-  if (setjmp(png_jmpbuf(png_handler.png_ptr))) {
-    PNG_CLEANUP
+//   if (setjmp(png_jmpbuf(png_handler.png_ptr))) {
+//     PNG_CLEANUP
+//     return 0;
+//   }
+
+//   png_set_write_fn(png_handler.png_ptr, png_handler.write_buf, user_write_data, user_flush_data);
+//   png_set_IHDR(png_handler.png_ptr, png_handler.info_ptr, width, height,
+//                bit_depth, color_type, PNG_INTERLACE_NONE,
+//                PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
+
+//   png_write_info(png_handler.png_ptr, png_handler.info_ptr);
+
+//   size_t rowbytes = png_get_rowbytes(png_handler.png_ptr, png_handler.info_ptr);
+//   std::vector<uint8_t> image_data(rowbytes * height, 0); // Initialize to 0
+//   std::vector<png_bytep> row_ptrs(height);
+//   for (size_t i = 0; i < height; ++i)
+//     row_ptrs[i] = image_data.data() + i * rowbytes;
+
+//   png_write_image(png_handler.png_ptr, row_ptrs.data());
+//   png_write_end(png_handler.png_ptr, nullptr);
+
+//   PNG_CLEANUP
+//   return 0;
+// }
+
+extern "C" int LLVMFuzzerTestOneInput(const uint8_t* f_data, size_t f_size) {
+
+    FILE *in_file = fmemopen((void *)f_data, f_size, "rb");
+    FILE *out_file = fopen("output_file", "wb");
+
+    // Create libpng read and write structures
+    png_structp read_ptr = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+    png_structp write_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+
+
+    png_infop info_ptr = png_create_info_struct(read_ptr);
+
+
+    // Set up error handling
+    if (setjmp(png_jmpbuf(read_ptr))) {
+        png_destroy_read_struct(&read_ptr, &info_ptr, NULL);
+        png_destroy_write_struct(&write_ptr, NULL);
+        fclose(in_file);
+        fclose(out_file);
+	    return 0;
+    }
+
+    // Set up the input/output functions
+    png_set_read_fn(read_ptr, (png_voidp)in_file, [](png_structp png_ptr, png_bytep data, size_t size){
+        fread(data, 1, size, (FILE *)png_get_io_ptr(png_ptr));
+    });
+
+    png_set_write_fn(write_ptr, (png_voidp)out_file, [](png_structp png_ptr, png_bytep data, size_t size){
+        fwrite(data, 1, size, (FILE *)png_get_io_ptr(png_ptr));
+    }, NULL);
+    
+    // Read the PNG data
+    png_read_png(read_ptr, info_ptr, PNG_TRANSFORM_IDENTITY, NULL);
+
+    // Write the PNG data
+    png_write_png(write_ptr, info_ptr, 0x7089, NULL);
     return 0;
-  }
-
-  png_set_write_fn(png_handler.png_ptr, png_handler.write_buf, user_write_data, user_flush_data);
-  png_set_IHDR(png_handler.png_ptr, png_handler.info_ptr, width, height,
-               bit_depth, color_type, PNG_INTERLACE_NONE,
-               PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
-
-  png_write_info(png_handler.png_ptr, png_handler.info_ptr);
-
-  size_t rowbytes = png_get_rowbytes(png_handler.png_ptr, png_handler.info_ptr);
-  std::vector<uint8_t> image_data(rowbytes * height, 0); // Initialize to 0
-  std::vector<png_bytep> row_ptrs(height);
-  for (size_t i = 0; i < height; ++i)
-    row_ptrs[i] = image_data.data() + i * rowbytes;
-
-  png_write_image(png_handler.png_ptr, row_ptrs.data());
-  png_write_end(png_handler.png_ptr, nullptr);
-
-  PNG_CLEANUP
-  return 0;
 }
 
 // extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
