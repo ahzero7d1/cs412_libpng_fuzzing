@@ -244,7 +244,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     fclose(in_file);
     fclose(out_file);
 	
-    PNG_CLEANUP
+    // PNG_CLEANUP
     return 0;
 }
 
