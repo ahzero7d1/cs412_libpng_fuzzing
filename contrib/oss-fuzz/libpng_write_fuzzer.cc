@@ -16,6 +16,7 @@
 #define PNG_INTERNAL
 #include "png.h"
 
+/*
 #define PNG_CLEANUP \
   if(png_handler.png_ptr) \
   { \
@@ -32,6 +33,22 @@
     png_handler.png_ptr = nullptr; \
     png_handler.row_ptr = nullptr; \
     png_handler.info_ptr = nullptr; \
+  }
+*/
+  
+#define PNG_CLEANUP \
+  if(png_handler.png_ptr) \
+  { \
+    if (png_handler.row_ptr) \
+      png_free(png_handler.png_ptr, png_handler.row_ptr); \
+    if (png_handler.info_ptr) \
+      png_destroy_write_struct(&png_handler.png_ptr, &png_handler.info_ptr); \
+    else \
+      png_destroy_write_struct(&png_handler.png_ptr, nullptr); \
+    png_handler.png_ptr = nullptr; \
+    png_handler.row_ptr = nullptr; \
+    png_handler.info_ptr = nullptr; \
+    png_handler.end_info_ptr = nullptr; \
   }
 
 // if (png_handler.end_info_ptr) \
