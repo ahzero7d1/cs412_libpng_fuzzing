@@ -74,28 +74,46 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     return 0;
   }
 
-  png_struct *png = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
-  png_set_write_fn(png, NULL, write_handler, NULL);
+  PngObjectHandler png_handler;
 
-  png_info *info = png_create_info_struct(png);
-  png_uint_32 width = 0;
-  info->width = width;
-  info->color_type = PNG_COLOR_TYPE_GRAY;
-  info->bit_depth = 16;
-  info->channels = 2;
-  info->height = 1;
-  info->pixel_depth = info->channels * info->bit_depth;
-  info->rowbytes = PNG_ROWBYTES(info->pixel_depth, info->width);
+  // Use setjmp for error handling
+  if (setjmp(jmpbuf_g)) {
+    // If we jump here, a libpng error occurred. The PngObjectHandler destructor
+    // will handle cleanup.
+    return 0;
+  }
 
-  png_bytep *image = malloc(info->height * sizeof(png_bytep));
+  // Create libpng write structures
+  png_handler.png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING,
+                                                nullptr, user_error_fn, nullptr);
+  if (!png_handler.png_ptr) {
+    return 0; // Allocation failed
+  }
+
+ 
+  png_handler.info_ptr = png_create_info_struct(png_handler.png_ptr);
+  if (!png_handler.info_ptr) {
+    return 0; // Allocation failed (PngObjectHandler destructor cleans png_ptr)
+  }
+
+  uint32_t width = 0;
+  png_handler.info_ptr->width = width;
+  png_handler.info_ptr->color_type = PNG_COLOR_TYPE_GRAY;
+  png_handler.info_ptr->bit_depth = 16;
+  png_handler.info_ptr->channels = 2;
+  png_handler.info_ptr->height = 1;
+  png_handler.info_ptr->pixel_depth = png_handler.info_ptr->channels * png_handler.info_ptr->bit_depth;
+  png_handler.info_ptr->rowbytes = PNG_ROWBYTES(png_handler.info_ptr->pixel_depth, png_handler.info_ptr->width);
+
+  png_bytep *image = malloc(png_handler.info_ptr->height * sizeof(png_bytep));
   for (unsigned i = 0; i < info->height; i++) {
       image[i] = calloc(info->rowbytes, 1);
   }
-  png_set_rows(png, info, image);
+  png_set_rows(png, png_handler.info_ptr, image);
 
   int transforms = PNG_TRANSFORM_STRIP_FILLER_AFTER | \
                    PNG_TRANSFORM_INVERT_MONO;
-  png_write_png(png, info, transforms, NULL);
+  png_write_png(png, png_handler.info_ptr, transforms, NULL);
 
 
   png_write_end(png_handler.png_ptr, png_handler.info_ptr);
