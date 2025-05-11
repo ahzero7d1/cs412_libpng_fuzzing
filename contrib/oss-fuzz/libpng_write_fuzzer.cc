@@ -268,7 +268,9 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         uint8_t tf = data[4];
         int flags = 0;
         if (tf & 1) flags |= PNG_TRANSFORM_EXPAND;
-        if (tf & 2) flags |= PNG_TRANSFORM_PACK;
+        #ifdef PNG_TRANSFORM_PACKING
+        if (tf & 2) flags |= PNG_TRANSFORM_PACKING;
+        #endif
         if (tf & 4) flags |= PNG_TRANSFORM_STRIP_ALPHA;
         if (tf & 8) flags |= PNG_TRANSFORM_INVERT_MONO;
 
