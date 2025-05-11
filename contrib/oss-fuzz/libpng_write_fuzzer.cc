@@ -88,10 +88,10 @@ struct WriteBuffer {
   std::vector<uint8_t> data;
 };
 
-struct BufState {
-  const uint8_t* data;
-  size_t bytes_left;
-};
+// struct BufState {
+//   const uint8_t* data;
+//   size_t bytes_left;
+// };
 
 struct PngObjectHandler {
   png_infop info_ptr = nullptr;
@@ -187,66 +187,81 @@ void default_free(png_structp png_ptr, png_voidp ptr) {
 //   return 0;
 // }
 
-extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
-    /* libpng needs at least an 8-byte signature.  Zero-length inputs add no value. */
-    if (size < 8)
-        return 0;
 
-    FILE* in_file  = fmemopen((void*)data, size, "rb");
-    if (!in_file)                       /* fmemopen() can fail */
-        return 0;
+/* ------------------------------------------------------------------------- */
+/*  In-memory PNG round-trip harness – no PNG_STDIO_REQUIRED                 */
+/* ------------------------------------------------------------------------- */
 
-    FILE* out_file = tmpfile();         /* safer than writing to a fixed path */
-    if (!out_file) {
-        fclose(in_file);
-        return 0;
-    }
+struct BufferState {
+  const uint8_t* data;
+  size_t         size;
+  size_t         off;
+};
 
-    png_structp read_ptr  = png_create_read_struct(PNG_LIBPNG_VER_STRING,
-                                                   nullptr, nullptr, nullptr);
-    png_structp write_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING,
-                                                    nullptr, nullptr, nullptr);
-    if (!read_ptr || !write_ptr) {
-        if (read_ptr)  png_destroy_read_struct (&read_ptr , nullptr, nullptr);
-        if (write_ptr) png_destroy_write_struct(&write_ptr, nullptr);
-        fclose(in_file);
-        fclose(out_file);
-        return 0;
-    }
-
-    png_infop info_ptr = png_create_info_struct(read_ptr);
-    if (!info_ptr) {                             /* extremely unlikely */
-        png_destroy_read_struct(&read_ptr, nullptr, nullptr);
-        png_destroy_write_struct(&write_ptr, nullptr);
-        fclose(in_file);
-        fclose(out_file);
-        return 0;
-    }
-
-    /* libpng’s normal error-handling mechanism */
-    if (setjmp(png_jmpbuf(read_ptr))) {
-        png_destroy_read_struct (&read_ptr , &info_ptr, nullptr);
-        png_destroy_write_struct(&write_ptr, nullptr);
-        fclose(in_file);
-        fclose(out_file);
-        return 0;
-    }
-
-    /* Use the simple built-in I/O instead of a custom callback */
-    png_init_io(read_ptr , in_file );
-    png_init_io(write_ptr, out_file);
-
-    png_read_png (read_ptr , info_ptr, PNG_TRANSFORM_IDENTITY, nullptr);
-    png_write_png(write_ptr, info_ptr, PNG_TRANSFORM_IDENTITY, nullptr);
-
-    png_destroy_read_struct (&read_ptr , &info_ptr, nullptr);
-    png_destroy_write_struct(&write_ptr, nullptr);
-    fclose(in_file);
-    fclose(out_file);
-	
-    // PNG_CLEANUP
-    return 0;
+/* Read from the fuzz-input buffer ---------------------------------------- */
+static void read_cb(png_structp png_ptr, png_bytep dst, size_t len)
+{
+  auto* s = static_cast<BufferState*>(png_get_io_ptr(png_ptr));
+  if (s->off + len > s->size)                      /* libpng will longjmp()   */
+    png_error(png_ptr, "read past end of buffer");
+  memcpy(dst, s->data + s->off, len);
+  s->off += len;
 }
+
+/* Discard encoder output (we only care about exercising the code paths) ---- */
+static void write_cb(png_structp, png_bytep, size_t) {}
+static void flush_cb(png_structp) {}
+
+static void  limited_free  (png_structp, png_voidp p) { free(p); }
+
+/* The entry point --------------------------------------------------------- */
+extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
+{
+  /* libpng needs the 8-byte PNG signature; tiny inputs add no coverage     */
+  if (size < 8)
+    return 0;
+
+  BufferState buf{data, size, 0};
+
+  png_structp png_r = png_create_read_struct (PNG_LIBPNG_VER_STRING,
+                                              nullptr, nullptr, nullptr);
+  if (!png_r) return 0;
+
+  png_structp png_w = png_create_write_struct(PNG_LIBPNG_VER_STRING,
+                                              nullptr, nullptr, nullptr);
+  if (!png_w) { png_destroy_read_struct(&png_r, nullptr, nullptr); return 0; }
+
+  png_infop info = png_create_info_struct(png_r);
+  if (!info) {
+    png_destroy_read_struct (&png_r, nullptr, nullptr);
+    png_destroy_write_struct(&png_w, nullptr);
+    return 0;
+  }
+
+  /* libpng long-jmp error exit ------------------------------------------- */
+  if (setjmp(png_jmpbuf(png_r))) {
+    png_destroy_read_struct (&png_r, &info, nullptr);
+    png_destroy_write_struct(&png_w, nullptr);
+    return 0;
+  }
+
+  /* Memory-allocation guard (optional) ----------------------------------- */
+  png_set_mem_fn(png_r, nullptr, limited_malloc, limited_free);
+  png_set_mem_fn(png_w, nullptr, limited_malloc, limited_free);
+
+  /* Hook up our in-memory I/O -------------------------------------------- */
+  png_set_read_fn (png_r, &buf, read_cb);
+  png_set_write_fn(png_w, nullptr, write_cb, flush_cb);
+
+  /* Decode, then immediately re-encode the image ------------------------- */
+  png_read_png (png_r, info, PNG_TRANSFORM_IDENTITY, nullptr);
+  png_write_png(png_w, info, PNG_TRANSFORM_IDENTITY, nullptr);
+
+  png_destroy_read_struct (&png_r, &info, nullptr);
+  png_destroy_write_struct(&png_w, nullptr);
+  return 0;
+}
+
 
 // extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 //     if (size < 16) {
