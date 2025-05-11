@@ -21,17 +21,27 @@
   { \
     if (png_handler.row_ptr) \
       png_free(png_handler.png_ptr, png_handler.row_ptr); \
-    if (png_handler.end_info_ptr) \
-      png_destroy_write_struct(&png_handler.png_ptr, &png_handler.info_ptr); \
-    else if (png_handler.info_ptr) \
-      png_destroy_write_struct(&png_handler.png_ptr, &png_handler.info_ptr); \
-    else \
-      png_destroy_write_struct(&png_handler.png_ptr, nullptr); \
+    if (info_ptr) { \
+      png_destroy_read_struct (&png_ptr, &info_ptr, nullptr); \
+      png_destroy_write_struct(&png_ptr, &info_ptr); \
+    } \
+    else { \
+      png_destroy_read_struct (&png_ptr, nullptr, nullptr); \
+      png_destroy_write_struct(&png_ptr, nullptr); \
+    } \
     png_handler.png_ptr = nullptr; \
     png_handler.row_ptr = nullptr; \
     png_handler.info_ptr = nullptr; \
-    png_handler.end_info_ptr = nullptr; \
   }
+
+// if (png_handler.end_info_ptr) \
+//   png_destroy_write_struct(&png_handler.png_ptr, &png_handler.info_ptr); \
+// else if (png_handler.info_ptr) \
+//   png_destroy_write_struct(&png_handler.png_ptr, &png_handler.info_ptr); \
+// else \
+//   png_destroy_write_struct(&png_handler.png_ptr, nullptr); \
+
+// png_handler.end_info_ptr = nullptr; \
 
 
 #define TEXT_TITLE    0x01
@@ -88,10 +98,20 @@ struct WriteBuffer {
   std::vector<uint8_t> data;
 };
 
+/* ------------------------------------------------------------------------- */
+/*  In-memory PNG round-trip harness – no PNG_STDIO_REQUIRED                 */
+/* ------------------------------------------------------------------------- */
+
 // struct BufState {
 //   const uint8_t* data;
 //   size_t bytes_left;
 // };
+struct BufferState {
+  const uint8_t* data;
+  size_t bytes_left;
+  size_t size;
+  size_t off;
+};
 
 struct PngObjectHandler {
   png_infop info_ptr = nullptr;
@@ -103,22 +123,17 @@ struct PngObjectHandler {
   ~PngObjectHandler() {
     if (row_ptr)
       png_free(png_ptr, row_ptr);
-    if (info_ptr)
+    if (info_ptr) {
+      png_destroy_read_struct (&png_ptr, &info_ptr, nullptr);
       png_destroy_write_struct(&png_ptr, &info_ptr);
-    else
+    }
+    else {
+      png_destroy_read_struct (&png_ptr, nullptr, nullptr);
       png_destroy_write_struct(&png_ptr, nullptr);
+    }
     delete write_buf;
   }
 };
-
-void user_write_data(png_structp png_ptr, png_bytep data, png_size_t length) {
-  WriteBuffer* buf = static_cast<WriteBuffer*>(png_get_io_ptr(png_ptr));
-  buf->data.insert(buf->data.end(), data, data + length);
-}
-
-void user_flush_data(png_structp png_ptr) {
-  // Do nothing. Required stub.
-}
 
 void* limited_malloc(png_structp png_ptr, png_alloc_size_t size) {
   // libpng may allocate large amounts of memory that the fuzzer reports as
@@ -131,72 +146,15 @@ void* limited_malloc(png_structp png_ptr, png_alloc_size_t size) {
   return malloc(size);
 }
 
-void default_free(png_structp png_ptr, png_voidp ptr) {
-  free(ptr);
+static void limited_free(png_structp, png_voidp ptr) 
+{
+  free(ptr); 
 }
 
-
-// Entry point for LibFuzzer.
-// Roughly follows the libpng book example:
-// http://www.libpng.org/pub/png/book/chapter15.html
-// extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
-//   if (size < 16) return 0;
-
-//   uint32_t width = (data[0] << 8) | data[1];
-//   uint32_t height = (data[2] << 8) | data[3];
-//   int bit_depth = 8;
-//   int color_type = PNG_COLOR_TYPE_RGBA;
-//   if (width == 0 || height == 0 || width > 1024 || height > 1024) return 0;
-
-//   PngObjectHandler png_handler;
-//   png_handler.write_buf = new WriteBuffer();
-
-//   png_handler.png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
-//   if (!png_handler.png_ptr) {
-//     return 0;
-//   }
-
-//   png_handler.info_ptr = png_create_info_struct(png_handler.png_ptr);
-//   if (!png_handler.info_ptr) {
-//     PNG_CLEANUP
-//     return 0;
-//   }
-  
-//   if (setjmp(png_jmpbuf(png_handler.png_ptr))) {
-//     PNG_CLEANUP
-//     return 0;
-//   }
-
-//   png_set_write_fn(png_handler.png_ptr, png_handler.write_buf, user_write_data, user_flush_data);
-//   png_set_IHDR(png_handler.png_ptr, png_handler.info_ptr, width, height,
-//                bit_depth, color_type, PNG_INTERLACE_NONE,
-//                PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
-
-//   png_write_info(png_handler.png_ptr, png_handler.info_ptr);
-
-//   size_t rowbytes = png_get_rowbytes(png_handler.png_ptr, png_handler.info_ptr);
-//   std::vector<uint8_t> image_data(rowbytes * height, 0); // Initialize to 0
-//   std::vector<png_bytep> row_ptrs(height);
-//   for (size_t i = 0; i < height; ++i)
-//     row_ptrs[i] = image_data.data() + i * rowbytes;
-
-//   png_write_image(png_handler.png_ptr, row_ptrs.data());
-//   png_write_end(png_handler.png_ptr, nullptr);
-
-//   PNG_CLEANUP
-//   return 0;
-// }
-
-
-/* ------------------------------------------------------------------------- */
-/*  In-memory PNG round-trip harness – no PNG_STDIO_REQUIRED                 */
-/* ------------------------------------------------------------------------- */
-
-struct BufferState {
-  const uint8_t* data;
-  size_t         size;
-  size_t         off;
-};
+void default_free(png_structp png_ptr, png_voidp ptr) 
+{
+  free(ptr);
+}
 
 /* Read from the fuzz-input buffer ---------------------------------------- */
 static void read_cb(png_structp png_ptr, png_bytep dst, size_t len)
@@ -204,61 +162,125 @@ static void read_cb(png_structp png_ptr, png_bytep dst, size_t len)
   auto* s = static_cast<BufferState*>(png_get_io_ptr(png_ptr));
   if (s->off + len > s->size)                      /* libpng will longjmp()   */
     png_error(png_ptr, "read past end of buffer");
+  
   memcpy(dst, s->data + s->off, len);
   s->off += len;
 }
 
 /* Discard encoder output (we only care about exercising the code paths) ---- */
-static void write_cb(png_structp, png_bytep, size_t) {}
+static void write_cb(png_structp, png_bytep, size_t) 
+{
+    WriteBuffer* buf = static_cast<WriteBuffer*>(png_get_io_ptr(png_ptr));
+    buf->data.insert(buf->data.end(), data, data + length);
+}
 static void flush_cb(png_structp) {}
 
-static void  limited_free  (png_structp, png_voidp p) { free(p); }
 
-/* The entry point --------------------------------------------------------- */
-extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
+void user_write_data(png_structp png_ptr, png_bytep data, png_size_t length) 
 {
-  /* libpng needs the 8-byte PNG signature; tiny inputs add no coverage     */
-  if (size < 8)
-    return 0;
+  WriteBuffer* buf = static_cast<WriteBuffer*>(png_get_io_ptr(png_ptr));
+  buf->data.insert(buf->data.end(), data, data + length);
+}
+void user_flush_data(png_structp png_ptr) { /* Do nothing. Required stub. */ }
 
-  BufferState buf{data, size, 0};
 
-  png_structp png_r = png_create_read_struct (PNG_LIBPNG_VER_STRING,
-                                              nullptr, nullptr, nullptr);
-  if (!png_r) return 0;
+// Entry point for LibFuzzer.
+// Roughly follows the libpng book example:
+// http://www.libpng.org/pub/png/book/chapter15.html
+extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
+  // if (size < 8)
+  if (size < 16) return 0;
 
-  png_structp png_w = png_create_write_struct(PNG_LIBPNG_VER_STRING,
-                                              nullptr, nullptr, nullptr);
-  if (!png_w) { png_destroy_read_struct(&png_r, nullptr, nullptr); return 0; }
+  uint32_t width = (data[0] << 8) | data[1];
+  uint32_t height = (data[2] << 8) | data[3];
+  int bit_depth = 8;
+  int color_type = PNG_COLOR_TYPE_RGBA;
+  if (width == 0 || height == 0 || width > 1024 || height > 1024) return 0;
 
-  png_infop info = png_create_info_struct(png_r);
-  if (!info) {
-    png_destroy_read_struct (&png_r, nullptr, nullptr);
-    png_destroy_write_struct(&png_w, nullptr);
+  PngObjectHandler png_handler;
+  png_handler.write_buf = new WriteBuffer();
+
+  png_handler.png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
+  if (!png_handler.png_ptr) {
     return 0;
   }
 
-  /* libpng long-jmp error exit ------------------------------------------- */
-  if (setjmp(png_jmpbuf(png_r))) {
-    png_destroy_read_struct (&png_r, &info, nullptr);
-    png_destroy_write_struct(&png_w, nullptr);
+  png_handler.info_ptr = png_create_info_struct(png_handler.png_ptr);
+  if (!png_handler.info_ptr) {
+    PNG_CLEANUP
+    return 0;
+  }
+  
+  if (setjmp(png_jmpbuf(png_handler.png_ptr))) {
+    PNG_CLEANUP
     return 0;
   }
 
-  /* Memory-allocation guard (optional) ----------------------------------- */
-  png_set_mem_fn(png_r, nullptr, limited_malloc, limited_free);
-  png_set_mem_fn(png_w, nullptr, limited_malloc, limited_free);
 
-  /* Hook up our in-memory I/O -------------------------------------------- */
-  png_set_read_fn (png_r, &buf, read_cb);
-  png_set_write_fn(png_w, nullptr, write_cb, flush_cb);
+  /* limit allocations & hook up in-memory write */
+  png_set_mem_fn(png_handler.png_ptr, nullptr, limited_malloc, limited_free);
+  png_set_write_fn(png_handler.png_ptr, png_handler.write_buf,
+                   write_cb, flush_cb);
+  
+  png_set_IHDR(png_handler.png_ptr, png_handler.info_ptr,
+               width, height,
+               /* bit depth */ 8,
+               PNG_COLOR_TYPE_RGBA,
+               PNG_INTERLACE_NONE,
+               PNG_COMPRESSION_TYPE_DEFAULT,
+               PNG_FILTER_TYPE_DEFAULT);
+  
+  png_write_info(png_handler.png_ptr, png_handler.info_ptr);
 
-  /* Decode, then immediately re-encode the image ------------------------- */
-  png_read_png (png_r, info, PNG_TRANSFORM_IDENTITY, nullptr);
-  png_write_png(png_w, info, PNG_TRANSFORM_IDENTITY, nullptr);
+  // png_set_write_fn(png_handler.png_ptr, png_handler.write_buf, user_write_data, user_flush_data);
+  // png_set_IHDR(png_handler.png_ptr, png_handler.info_ptr, width, height,
+  //              bit_depth, color_type, PNG_INTERLACE_NONE,
+  //              PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
 
-  png_destroy_read_struct (&png_r, &info, nullptr);
-  png_destroy_write_struct(&png_w, nullptr);
+  // png_write_info(png_handler.png_ptr, png_handler.info_ptr);
+
+
+  size_t rowbytes = png_get_rowbytes(png_handler.png_ptr, png_handler.info_ptr);
+  std::vector<uint8_t> img(rowbytes * height, 0); /* black */
+  std::vector<png_bytep> rows(height);
+  for (size_t i = 0; i < height; ++i) rows[i] = img.data() + i * rowbytes;
+
+  png_write_image(png_handler.png_ptr, rows.data());
+  png_write_end(png_handler.png_ptr, nullptr);
+
+
+  /* ------------------------------------------------------------------ */
+  /* 2.  Immediately **read back** the generated PNG to hit decode paths */
+  /* ------------------------------------------------------------------ */
+  BufferState rbuf{ png_handler.write_buf->data.data(),
+                    png_handler.write_buf->data.size(), 0 };
+
+  png_structp rd = png_create_read_struct(PNG_LIBPNG_VER_STRING,
+                                          nullptr, nullptr, nullptr);
+  if (rd) {
+    png_infop rd_info = png_create_info_struct(rd);
+    if (rd_info) {
+      if (setjmp(png_jmpbuf(rd)) == 0) {
+        png_set_mem_fn(rd, nullptr, limited_malloc, limited_free);
+        png_set_read_fn(rd, &rbuf, read_cb);
+
+        /* choose transform flags from fuzz‑data byte 4 for variety */
+        uint8_t tf = data[4];
+        int flags = 0;
+        if (tf & 1) flags |= PNG_TRANSFORM_EXPAND;
+        if (tf & 2) flags |= PNG_TRANSFORM_PACK;
+        if (tf & 4) flags |= PNG_TRANSFORM_STRIP_ALPHA;
+        if (tf & 8) flags |= PNG_TRANSFORM_INVERT_MONO;
+
+        png_read_png(rd, rd_info, flags, nullptr);
+      }
+      png_destroy_read_struct(&rd, &rd_info, nullptr);
+    } else {
+      png_destroy_read_struct(&rd, nullptr, nullptr);
+    }
+  }
+
+  PNG_CLEANUP
   return 0;
 }
 
@@ -457,3 +479,53 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
 //     return 0;
 // }
 
+
+
+
+
+// extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
+// {
+//   /* libpng needs the 8-byte PNG signature; tiny inputs add no coverage     */
+//   if (size < 8)
+//     return 0;
+
+//   BufferState buf{data, size, 0};
+
+//   png_structp png_r = png_create_read_struct (PNG_LIBPNG_VER_STRING,
+//                                               nullptr, nullptr, nullptr);
+//   if (!png_r) return 0;
+
+//   png_structp png_w = png_create_write_struct(PNG_LIBPNG_VER_STRING,
+//                                               nullptr, nullptr, nullptr);
+//   if (!png_w) { png_destroy_read_struct(&png_r, nullptr, nullptr); return 0; }
+
+//   png_infop info = png_create_info_struct(png_r);
+//   if (!info) {
+//     png_destroy_read_struct (&png_r, nullptr, nullptr);
+//     png_destroy_write_struct(&png_w, nullptr);
+//     return 0;
+//   }
+
+//   /* libpng long-jmp error exit ------------------------------------------- */
+//   if (setjmp(png_jmpbuf(png_r))) {
+//     png_destroy_read_struct (&png_r, &info, nullptr);
+//     png_destroy_write_struct(&png_w, nullptr);
+//     return 0;
+//   }
+
+//   /* Memory-allocation guard (optional) ----------------------------------- */
+//   png_set_mem_fn(png_r, nullptr, limited_malloc, limited_free);
+//   png_set_mem_fn(png_w, nullptr, limited_malloc, limited_free);
+
+//   /* Hook up our in-memory I/O -------------------------------------------- */
+//   png_set_read_fn (png_r, &buf, read_cb);
+//   png_set_write_fn(png_w, nullptr, write_cb, flush_cb);
+
+//   /* Decode, then immediately re-encode the image ------------------------- */
+//   png_read_png (png_r, info, PNG_TRANSFORM_IDENTITY, nullptr);
+//   png_write_png(png_w, info, PNG_TRANSFORM_IDENTITY, nullptr);
+
+//   png_destroy_read_struct (&png_r, &info, nullptr);
+//   png_destroy_write_struct(&png_w, nullptr);
+//   return 0;
+// }
