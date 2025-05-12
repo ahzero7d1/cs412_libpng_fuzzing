@@ -1,7 +1,6 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
-#include <vector>
 
 #include "png.h"
 
@@ -138,7 +137,9 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   // If color type is palette, set a palette
   if (color_type == PNG_COLOR_TYPE_PALETTE) {
     int num_palette = (data[8] % 256) + 1;
-    std::vector<png_color> palette(num_palette);
+    
+    // Use png_malloc instead of std::vector to avoid leaks
+    png_colorp palette = (png_colorp)png_malloc(handler.png_ptr, num_palette * sizeof(png_color));
     
     for (int i = 0; i < num_palette && (i*3 + 16) < size; i++) {
       palette[i].red = data[9 + i*3];
@@ -146,18 +147,22 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
       palette[i].blue = data[11 + i*3];
     }
     
-    png_set_PLTE(handler.png_ptr, handler.info_ptr, palette.data(), num_palette);
+    png_set_PLTE(handler.png_ptr, handler.info_ptr, palette, num_palette);
     
     // Add transparency for some palette entries if data available
     if (size > 32 + num_palette && (data[12] & 1)) {
       int num_trans = data[13] % num_palette;
-      std::vector<png_byte> trans(num_trans);
+      
+      // Use png_malloc for transparent values too
+      png_bytep trans = (png_bytep)png_malloc(handler.png_ptr, num_trans);
       
       for (int i = 0; i < num_trans && (i + 32) < size; i++) {
         trans[i] = data[14 + i];
       }
       
-      png_set_tRNS(handler.png_ptr, handler.info_ptr, trans.data(), num_trans, nullptr);
+      png_set_tRNS(handler.png_ptr, handler.info_ptr, trans, num_trans, nullptr);
+      
+      // No need to free trans - libpng will handle it
     }
   }
   
