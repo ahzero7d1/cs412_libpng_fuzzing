@@ -41,35 +41,6 @@
     png_handler.end_info_ptr = nullptr; \
   }
 
-// Progressive-read callbacks
-static void prog_info_fn(png_structp png_ptr, png_infop info_ptr) {
-  // no-op
-}
-static void prog_row_fn(png_structp png_ptr, png_bytep row,
-                        png_uint_32 y, int pass) {
-  // no-op
-}
-static void prog_end_fn(png_structp png_ptr, png_infop info_ptr) {
-  // no-op
-}
-
-// minimal in-memory write buffer and write function
-struct MemBuf {
-  uint8_t *buf;
-  size_t   capacity;
-  size_t   used;
-};
-
-static void write_data_fn(png_structp png_ptr,
-                          png_bytep data, png_size_t length) {
-  MemBuf* m = (MemBuf*)png_get_io_ptr(png_ptr);
-  if (m->used + length <= m->capacity) {
-    memcpy(m->buf + m->used, data, length);
-  }
-  m->used += length;
-}
-
-
 struct BufState {
   const uint8_t* data;
   size_t bytes_left;
@@ -228,70 +199,25 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
                    static_cast<png_bytep>(png_handler.row_ptr), nullptr);
     }
   }
-  
+
   png_read_end(png_handler.png_ptr, png_handler.end_info_ptr);
 
-  // progressive read
-  {
-    png_structp p = png_create_read_struct(
-        PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
-    if (p) {
-      png_infop info = png_create_info_struct(p);
-      png_infop end  = png_create_info_struct(p);
-      if (info && end) {
-        if (!setjmp(png_jmpbuf(p))) {
-          png_set_progressive_read_fn(
-            p, nullptr,
-            prog_info_fn,
-            prog_row_fn,
-            prog_end_fn);
-          png_process_data(
-            p, info,
-            const_cast<png_bytep>(data + kPngHeaderSize),
-            size - kPngHeaderSize);
-        }
-      }
-      png_destroy_read_struct(&p, info ? &info : nullptr, end ? &end : nullptr);
-    }
+  PNG_CLEANUP
+
+#ifdef PNG_SIMPLIFIED_READ_SUPPORTED
+  // Simplified READ API
+  png_image image;
+  memset(&image, 0, (sizeof image));
+  image.version = PNG_IMAGE_VERSION;
+
+  if (!png_image_begin_read_from_memory(&image, data, size)) {
+    return 0;
   }
 
-  // pngwrite
-  {
-    png_structp wp = png_create_write_struct(
-        PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
-    if (wp) {
-      png_infop wi = png_create_info_struct(wp);
-      if (wi && !setjmp(png_jmpbuf(wp))) {
-        // allocate small buffer
-        MemBuf mb;
-        mb.capacity = 1024;
-        mb.used     = 0;
-        mb.buf      = (uint8_t*)malloc(mb.capacity);
+  image.format = PNG_FORMAT_RGBA;
+  std::vector<png_byte> buffer(PNG_IMAGE_SIZE(image));
+  png_image_finish_read(&image, NULL, buffer.data(), 0, NULL);
+#endif
 
-        png_set_write_fn(wp, &mb,
-                         write_data_fn,
-                         /*flush=*/nullptr);
-
-        // write a trivial 1×1 grayscale PNG
-        png_set_IHDR(wp, wi,
-                     1, 1, 8,
-                     PNG_COLOR_TYPE_GRAY,
-                     PNG_INTERLACE_NONE,
-                     PNG_COMPRESSION_TYPE_BASE,
-                     PNG_FILTER_TYPE_BASE);
-        png_write_info(wp, wi);
-
-        png_bytep row = (png_bytep)malloc(1);
-        png_write_row(wp, row);
-        free(row);
-
-        png_write_end(wp, wi);
-        free(mb.buf);
-      }
-      png_destroy_write_struct(&wp, wi ? &wi : nullptr);
-    }
-  }
-
-  
   return 0;
 }
