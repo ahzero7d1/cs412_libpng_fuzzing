@@ -23,12 +23,12 @@
 ################################################################################
 
 # Disable logging via library build configuration control.
-# cat scripts/pnglibconf.dfa | \
-#   sed -e "s/option STDIO/option STDIO disabled/" \
-#       -e "s/option WARNING /option WARNING disabled/" \
-#       -e "s/option WRITE enables WRITE_INT_FUNCTIONS/option WRITE disabled/" \
-# > scripts/pnglibconf.dfa.temp
-# mv scripts/pnglibconf.dfa.temp scripts/pnglibconf.dfa
+cat scripts/pnglibconf.dfa | \
+  sed -e "s/option STDIO/option STDIO disabled/" \
+      -e "s/option WARNING /option WARNING disabled/" \
+      -e "s/option WRITE enables WRITE_INT_FUNCTIONS/option WRITE disabled/" \
+> scripts/pnglibconf.dfa.temp
+mv scripts/pnglibconf.dfa.temp scripts/pnglibconf.dfa
 
 # build the libpng library.
 autoreconf -f -i
@@ -43,8 +43,8 @@ $CXX $CXXFLAGS -std=c++11 -I. \
      -lFuzzingEngine .libs/libpng16.a -lz
 
 # add seed corpus.
-find $SRC/libpng -name "*.png" | grep -v crashers | \
-     xargs zip $OUT/libpng_fuzzer_seed_corpus.zip
+# find $SRC/libpng -name "*.png" | grep -v crashers | \
+#      xargs zip $OUT/libpng_fuzzer_seed_corpus.zip
 
 cp $SRC/libpng/contrib/oss-fuzz/*.dict \
      $SRC/libpng/contrib/oss-fuzz/*.options $OUT/
