@@ -31,7 +31,7 @@ struct FuzzerWriteContext {
 // Custom error handler for libpng
 void user_error_fn(png_structp png_ptr, png_const_charp error_msg) {
     FuzzerWriteContext* context = static_cast<FuzzerWriteContext*>(png_get_error_ptr(png_ptr));
-    fprintf(stderr, "libpng error: %s\n", error_msg);
+    // fprintf(stderr, "libpng error: %s\n", error_msg);
     if (context) {
         longjmp(context->jmpbuf, 1); // Jump back to setjmp
     } else {
