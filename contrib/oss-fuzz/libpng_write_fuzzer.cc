@@ -100,7 +100,13 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   if (bit_depth < 8)
     png_set_packing(png_handler.png_ptr);
 
-  png_color_8 sig_bit = {bit_depth, bit_depth, bit_depth, bit_depth, bit_depth};
+  png_color_8 sig_bit = {
+    static_cast<png_byte>(bit_depth),
+    static_cast<png_byte>(bit_depth),
+    static_cast<png_byte>(bit_depth),
+    static_cast<png_byte>(bit_depth),
+    static_cast<png_byte>(bit_depth)
+  };
   png_set_shift(png_handler.png_ptr, &sig_bit);
 
   png_set_write_user_transform_fn(png_handler.png_ptr,
@@ -260,7 +266,7 @@ typedef struct _mainprog_info {
     char *copyright;
     char *email;
     char *url;
-    int filter;    /* command-line-filter flag, not PNG row filter! */
+    int filter;   
    /* int pnmtype;
     int sample_depth;
     int interlaced;
