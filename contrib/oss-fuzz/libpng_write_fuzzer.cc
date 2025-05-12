@@ -102,7 +102,6 @@ void free_text_buffers(FuzzerWriteContext* context) {
     context->png_text_chunks.clear(); // These don't own the buffers
 }
 
-
 // Entry point for LibFuzzer
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     FuzzerWriteContext context;
@@ -160,8 +159,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     // Limit dimensions to prevent excessive memory use and computation time
     const uint32_t MAX_FUZZ_DIM = 1024; // e.g., Max 1024x1024 image
     if (context.width == 0 || context.height == 0 || context.width > MAX_FUZZ_DIM || context.height > MAX_FUZZ_DIM) {
-         png_destroy_write_struct(&context.png_ptr, &context.info_ptr);
-         return 0;
+          png_destroy_write_struct(&context.png_ptr, &context.info_ptr);
+          return 0;
     }
 
     // Bit Depth (1 byte)
@@ -179,7 +178,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 
     // Color Type (1 byte) - try to match bit depth validity
     if (size > current_offset) {
-         switch (data[current_offset] % 5) { // Cycle through common color types
+          switch (data[current_offset] % 5) { // Cycle through common color types
             case 0: context.color_type = PNG_COLOR_TYPE_GRAY; break;
             case 1: context.color_type = PNG_COLOR_TYPE_GRAY_ALPHA; break;
             case 2: context.color_type = PNG_COLOR_TYPE_RGB; break;
@@ -195,9 +194,9 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
             context.bit_depth != 8 && context.bit_depth != 16) {
             context.bit_depth = 8; // Default to valid bit depth
         }
-         if (context.bit_depth < 8 && context.color_type == PNG_COLOR_TYPE_GRAY_ALPHA) {
+          if (context.bit_depth < 8 && context.color_type == PNG_COLOR_TYPE_GRAY_ALPHA) {
               context.color_type = PNG_COLOR_TYPE_GRAY; // Alpha not allowed for < 8 bit gray
-         }
+          }
     } else if (context.color_type == PNG_COLOR_TYPE_RGB || context.color_type == PNG_COLOR_TYPE_RGB_ALPHA) {
         if (context.bit_depth != 8 && context.bit_depth != 16) {
             context.bit_depth = 8; // Default to valid bit depth
@@ -230,10 +229,11 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     // Use remaining fuzzer input to decide which chunks to add and their data
 
     // gAMA chunk (1 byte flag + 2 bytes value if present)
-    if (size > current_offset && data[current_offset] > 127 && size > current_offset + 2) {
-        double gamma = (double)(data[current_offset+1] << 8 | data[current_offset+2]) / 100000.0; // Scale to a reasonable gamma range
+    if (size > current_offset + 2 && data[current_offset] > 127) {
+        current_offset++; // Consume the flag byte
+        double gamma = (double)(data[current_offset] << 8 | data[current_offset+1]) / 100000.0; // Scale to a reasonable gamma range
         png_set_gAMA(context.png_ptr, context.info_ptr, gamma);
-        current_offset += 3;
+        current_offset += 2;
     } else if (size > current_offset) {
         current_offset++; // Consume the flag byte even if not used
     }
@@ -250,35 +250,35 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         if (context.color_type == PNG_COLOR_TYPE_GRAY || context.color_type == PNG_COLOR_TYPE_GRAY_ALPHA) {
             // Gray background (1 or 2 bytes)
             if (context.bit_depth <= 8 && remaining_size >= 1) {
-                 background.gray = data[current_offset];
-                 current_offset += 1;
+                  background.gray = data[current_offset];
+                  current_offset += 1;
             } else if (context.bit_depth == 16 && remaining_size >= 2) {
-                 background.gray = (data[current_offset] << 8 | data[current_offset+1]);
-                 current_offset += 2;
+                  background.gray = (data[current_offset] << 8 | data[current_offset+1]);
+                  current_offset += 2;
             }
         } else if (context.color_type == PNG_COLOR_TYPE_RGB || context.color_type == PNG_COLOR_TYPE_RGB_ALPHA) {
             // RGB background (3 or 6 bytes)
-             if (context.bit_depth <= 8 && remaining_size >= 3) {
-                 background.red = data[current_offset];
-                 background.green = data[current_offset+1];
-                 background.blue = data[current_offset+2];
-                 current_offset += 3;
-             } else if (context.bit_depth == 16 && remaining_size >= 6) {
-                 background.red = (data[current_offset] << 8 | data[current_offset+1]);
-                 background.green = (data[current_offset+2] << 8 | data[current_offset+3]);
-                 background.blue = (data[current_offset+4] << 8 | data[current_offset+5]);
-                 current_offset += 6;
-             }
+              if (context.bit_depth <= 8 && remaining_size >= 3) {
+                  background.red = data[current_offset];
+                  background.green = data[current_offset+1];
+                  background.blue = data[current_offset+2];
+                  current_offset += 3;
+              } else if (context.bit_depth == 16 && remaining_size >= 6) {
+                  background.red = (data[current_offset] << 8 | data[current_offset+1]);
+                  background.green = (data[current_offset+2] << 8 | data[current_offset+3]);
+                  background.blue = (data[current_offset+4] << 8 | data[current_offset+5]);
+                  current_offset += 6;
+              }
         } else if (context.color_type == PNG_COLOR_TYPE_PALETTE) {
             // Palette background (1 byte index)
             if (remaining_size >= 1) {
-                 background.index = data[current_offset];
-                 current_offset += 1;
+                  background.index = data[current_offset];
+                  current_offset += 1;
             }
         }
         // Only set bKGD if we consumed some data for it
-        if (current_offset > (size_t)(data - data)) { // Check if offset moved
-             png_set_bKGD(context.png_ptr, context.info_ptr, &background);
+        if (current_offset > (size_t)(data + (current_offset > 0 ? -1 : 0))) { // Check if offset moved (account for flag)
+              png_set_bKGD(context.png_ptr, context.info_ptr, &background);
         }
 
     } else if (size > current_offset) {
@@ -290,20 +290,23 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     if (size > current_offset + 7 && data[current_offset] > 127) {
         current_offset++; // Consume the flag byte
         png_time modtime;
+
         // Populate modtime fields from fuzzer input (basic derivation)
         modtime.year = 1900 + (size > current_offset ? data[current_offset] : 0); // 1900 onwards
         modtime.month = 1 + (size > current_offset + 1 ? data[current_offset+1] % 12 : 0); // 1-12
-        modtime.day = 1 + (size > current_offset + 2 ? data[current_offset+2] % 31 : 0);   // 1-31
-        modtime.hour = size > current_offset + 3 ? data[current_offset+3] % 24 : 0;        // 0-23
-        modtime.minute = size > current_offset + 4 ? data[current_offset+4] % 60 : 0;      // 0-59
-        modtime.second = size > current_offset + 5 ? data[current_offset+5] % 60 : 0;      // 0-59
+        modtime.day = 1 + (size > current_offset + 2 ? data[current_offset+2] % 31 : 0);    // 1-31
+        modtime.hour = size > current_offset + 3 ? data[current_offset+3] % 24 : 0;         // 0-23
+        modtime.minute = size > current_offset + 4 ? data[current_offset+4] % 60 : 0;       // 0-59
+        modtime.second = size > current_offset + 5 ? data[current_offset+5] % 60 : 0;       // 0-59
+
         // libpng requires tm struct for png_convert_from_time_t, let's use png_set_tIME directly
         // which takes png_time.
         png_set_tIME(context.png_ptr, context.info_ptr, &modtime);
         current_offset += 7;
     } else if (size > current_offset) {
-         current_offset++; // Consume the flag byte even if not used
+          current_offset++; // Consume the flag byte even if not used
     }
+
 
     // tEXt chunks (1 byte flag + variable length data)
     if (size > current_offset && data[current_offset] > 127) {
@@ -327,24 +330,25 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
             if (size > current_offset && data[current_offset] % 2 == 1) {
                 compression_type = PNG_TEXT_COMPRESSION_zTXt; // Use zTXt compression
             }
-             if (size > current_offset) current_offset++; // Consume compression flag
+              if (size > current_offset) current_offset++; // Consume compression flag
+
 
             // Extract key and text string from fuzzer input (null-terminated)
             // Simple extraction: find the first null byte for the key, then the next for the text
             const uint8_t* key_start = data + current_offset;
             size_t key_len = 0;
-            const uint8_t* key_end = (const uint8_t*)memchr(key_start, '\0', size - current_offset);
+            const uint8_t* key_end = (const uint8_t*)memchr(key_start, '\0', size > current_offset ? size - current_offset : 0);
             if (key_end) {
                 key_len = key_end - key_start;
             } else {
-                key_len = size - current_offset; // Use rest if no null byte
+                key_len = size > current_offset ? size - current_offset : 0; // Use rest if no null byte
             }
 
             char* key_buf = (char*)malloc(key_len + 1);
             if (!key_buf) {
-                 // Allocation failed, stop processing text chunks
-                 num_text_chunks_to_fuzz = i; // Adjust count
-                 break;
+                // Allocation failed, stop processing text chunks
+                num_text_chunks_to_fuzz = i; // Adjust count
+                break;
             }
             memcpy(key_buf, key_start, key_len);
             key_buf[key_len] = '\0';
@@ -361,11 +365,11 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
             }
 
             char* text_buf = (char*)malloc(text_len + 1);
-             if (!text_buf) {
-                 // Allocation failed, stop processing text chunks
-                 num_text_chunks_to_fuzz = i; // Adjust count
-                 break;
-            }
+              if (!text_buf) {
+                  // Allocation failed, stop processing text chunks
+                  num_text_chunks_to_fuzz = i; // Adjust count
+                  break;
+              }
             memcpy(text_buf, text_start, text_len);
             text_buf[text_len] = '\0';
             context.text_strings.push_back(text_buf);
@@ -381,7 +385,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         }
 
         if (num_text_chunks_to_fuzz > 0) {
-             png_set_text(context.png_ptr, context.info_ptr, context.png_text_chunks.data(), num_text_chunks_to_fuzz);
+              png_set_text(context.png_ptr, context.info_ptr, context.png_text_chunks.data(), num_text_chunks_to_fuzz);
         }
     } else if (size > current_offset) {
         current_offset++; // Consume the flag byte even if not used
@@ -390,9 +394,11 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 
     // For palette images, we need to set a palette
     if (context.color_type == PNG_COLOR_TYPE_PALETTE) {
+
         // Allocate palette based on bit depth (up to 2^bit_depth entries)
         int num_palette_entries = 1 << context.bit_depth;
         context.palette.resize(num_palette_entries);
+
         // Populate palette entries from fuzzer data (if available)
         // Simple approach: fill with repeating pattern from input
         const uint8_t* palette_src = data + current_offset;
@@ -400,7 +406,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         size_t bytes_to_copy = std::min(palette_src_size, (size_t)num_palette_entries * 3);
         memset(context.palette.data(), 0, num_palette_entries * 3); // Initialize to black
         if (bytes_to_copy > 0) {
-             memcpy(context.palette.data(), palette_src, bytes_to_copy);
+              memcpy(context.palette.data(), palette_src, bytes_to_copy);
         }
         current_offset += bytes_to_copy;
 
@@ -413,10 +419,10 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         int num_transparency_entries = std::min((int)transparency_src_size, num_palette_entries);
 
         if (num_transparency_entries > 0) {
-             context.transparency.resize(num_transparency_entries);
-             memcpy(context.transparency.data(), transparency_src, num_transparency_entries);
-             png_set_tRNS(context.png_ptr, context.info_ptr, context.transparency.data(), num_transparency_entries, nullptr);
-             current_offset += num_transparency_entries;
+              context.transparency.resize(num_transparency_entries);
+              memcpy(context.transparency.data(), transparency_src, num_transparency_entries);
+              png_set_tRNS(context.png_ptr, context.info_ptr, context.transparency.data(), num_transparency_entries, nullptr);
+              current_offset += num_transparency_entries;
         }
     }
 
@@ -436,9 +442,9 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     }
     // Adjust bytes per pixel for bit depths < 8
     if (context.bit_depth < 8) {
-         bytes_per_pixel = 1; // Packed pixels
+          bytes_per_pixel = 1; // Packed pixels
     } else if (context.bit_depth == 16) {
-         bytes_per_pixel *= 2;
+          bytes_per_pixel *= 2;
     }
 
 
@@ -446,7 +452,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     // Ensure rowbytes is consistent with our calculation (libpng might add padding)
     // This isn't strictly needed but can help debug calculation mismatches
     // if (rowbytes != context.width * bytes_per_pixel && (context.bit_depth >= 8 || (context.width * context.bit_depth) % 8 != 0)) {
-    //     fprintf(stderr, "Warning: Calculated rowbytes mismatch.\n");
+    //       fprintf(stderr, "Warning: Calculated rowbytes mismatch.\n");
     // }
 
 
@@ -459,29 +465,29 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         // This can require significant memory. Limit height/width accordingly.
         size_t total_pixel_data_size = context.height * rowbytes;
         if (total_pixel_data_size > 0) {
-             std::vector<uint8_t> pixel_data(total_pixel_data_size);
+              std::vector<uint8_t> pixel_data(total_pixel_data_size);
 
-             // Populate pixel data from fuzzer input (repeating pattern)
-             if (pixel_src_size > 0) {
-                size_t bytes_to_fill = std::min(total_pixel_data_size, pixel_src_size);
-                memcpy(pixel_data.data(), pixel_src, bytes_to_fill);
-                // If not enough fuzzer data, repeat or fill with default
-                if (total_pixel_data_size > pixel_src_size) {
+              // Populate pixel data from fuzzer input (repeating pattern)
+              if (pixel_src_size > 0) {
+                 size_t bytes_to_fill = std::min(total_pixel_data_size, pixel_src_size);
+                 memcpy(pixel_data.data(), pixel_src, bytes_to_fill);
+
+                 // If not enough fuzzer data, repeat or fill with default
+                 if (total_pixel_data_size > pixel_src_size) {
                     // Simple repetition or fill with 0
-                     memset(pixel_data.data() + pixel_src_size, 0, total_pixel_data_size - pixel_src_size);
-                }
+                      memset(pixel_data.data() + pixel_src_size, 0, total_pixel_data_size - pixel_src_size);
+                 }
 
-             } else {
-                 // No fuzzer data for pixels, fill with default (black)
-                 memset(pixel_data.data(), 0, total_pixel_data_size);
-             }
+              } else {
+                  // No fuzzer data for pixels, fill with default (black)
+                  memset(pixel_data.data(), 0, total_pixel_data_size);
+              }
 
-
-            std::vector<png_bytep> row_pointers(context.height);
-            for (png_uint_32 i = 0; i < context.height; ++i) {
-                row_pointers[i] = pixel_data.data() + i * rowbytes;
-            }
-            png_write_image(context.png_ptr, row_pointers.data());
+              std::vector<png_bytep> row_pointers(context.height);
+              for (png_uint_32 i = 0; i < context.height; ++i) {
+                  row_pointers[i] = pixel_data.data() + i * rowbytes;
+              }
+              png_write_image(context.png_ptr, row_pointers.data());
         }
 
     } else {
@@ -492,21 +498,21 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
             for (png_uint_32 y = 0; y < context.height; ++y) {
                 // Populate row buffer from fuzzer input (repeating pattern)
                 size_t bytes_to_fill = std::min(rowbytes, pixel_src_size > 0 ? pixel_src_size : 0);
-                 memset(row_buffer.data(), 0, rowbytes); // Initialize row buffer
-                 if (bytes_to_fill > 0) {
-                     memcpy(row_buffer.data(), pixel_src, bytes_to_fill);
-                     // If not enough fuzzer data for the row, repeat or fill with default
-                     if (rowbytes > pixel_src_size) {
-                         memset(row_buffer.data() + pixel_src_size, 0, rowbytes - pixel_src_size);
-                     }
-                 } else {
-                     // No fuzzer data source, fill row with default (black)
-                      memset(row_buffer.data(), 0, rowbytes);
-                 }
+                  memset(row_buffer.data(), 0, rowbytes); // Initialize row buffer
+                  if (bytes_to_fill > 0) {
+                      memcpy(row_buffer.data(), pixel_src, bytes_to_fill);
+                      // If not enough fuzzer data for the row, repeat or fill with default
+                      if (rowbytes > pixel_src_size) {
+                          memset(row_buffer.data() + pixel_src_size, 0, rowbytes - pixel_src_size);
+                      }
+                  } else {
+                      // No fuzzer data source, fill row with default (black)
+                       memset(row_buffer.data(), 0, rowbytes);
+                  }
 
-                 // Note: For simplicity, this uses the *same* pixel_src for every row.
-                 // A more advanced fuzzer might use different parts of the input for different rows.
-                 // The current_offset is NOT advanced here, so each row uses the same fuzzer data chunk.
+                // Note: For simplicity, this uses the *same* pixel_src for every row.
+                // A more advanced fuzzer might use different parts of the input for different rows.
+                // The current_offset is NOT advanced here, so each row uses the same fuzzer data chunk.
 
                 png_write_row(context.png_ptr, row_buffer.data());
             }
@@ -522,7 +528,6 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 
     // Free dynamically allocated memory for text chunks
     free_text_buffers(&context);
-
 
     return 0; // Return 0 on success
 }
