@@ -130,14 +130,20 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 
   png_write_info(png_handler.png_ptr, png_handler.info_ptr);
 
-  size_t rowbytes = png_get_rowbytes(png_handler.png_ptr, png_handler.info_ptr);
-  std::vector<uint8_t> image_data(rowbytes * height, 0);
-  std::vector<png_bytep> row_ptrs(height);
-  for (size_t i = 0; i < height; ++i)
-    row_ptrs[i] = image_data.data() + i * rowbytes;
+  // Wrap in a scope so vectors are freed before longjmp cleanup
+  {
+    size_t rowbytes = png_get_rowbytes(png_handler.png_ptr, png_handler.info_ptr);
+    std::vector<uint8_t> image_data(rowbytes * height, 0);
+    std::vector<png_bytep> row_ptrs(height);
+    for (size_t i = 0; i < height; ++i){
+      row_ptrs[i] = image_data.data() + i * rowbytes;
+    };
 
-  for (int p = 0; p < passes; ++p)
-    png_write_rows(png_handler.png_ptr, row_ptrs.data(), height);
+    for (int p = 0; p < passes; ++p)
+    {
+      png_write_rows(png_handler.png_ptr, row_ptrs.data(), height);
+    };
+  }
 
   png_write_end(png_handler.png_ptr, nullptr);
   PNG_CLEANUP
