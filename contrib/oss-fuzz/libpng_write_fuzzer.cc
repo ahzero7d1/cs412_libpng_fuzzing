@@ -23,7 +23,11 @@ struct PngHandler {
       png_destroy_write_struct(&png_ptr, &info_ptr);
     else if (png_ptr)
       png_destroy_write_struct(&png_ptr, nullptr);
-    delete buf_state;
+    
+    if (buf_state) {
+      free(buf_state->data); // Free the data buffer
+      delete buf_state;
+    }
   }
 };
 
