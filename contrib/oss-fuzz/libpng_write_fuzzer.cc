@@ -200,7 +200,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     std::fprintf(stderr, "right before the crash\n");
     std::fprintf(stderr, "row_ptr address: %p, size: %u bytes\n", handler.row_ptr, rowbytes);
     std::fprintf(stderr, "First 16 bytes of buffer: ");
-    for (uint32_t i = 0; i < std::min(rowbytes, (uint32_t)16); i++) {
+    for (uint32_t i = 0; i < (rowbytes < 16 ? rowbytes : 16); i++) {
       std::fprintf(stderr, "%02x ", handler.row_ptr[i]);
     }
     std::fprintf(stderr, "\n");
