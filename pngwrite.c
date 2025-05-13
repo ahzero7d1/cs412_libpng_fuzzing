@@ -743,6 +743,9 @@ png_do_write_intrapixel(png_row_infop row_info, png_bytep row)
 void PNGAPI
 png_write_row(png_structrp png_ptr, png_const_bytep row)
 {
+   /* Debug print for function parameters */
+   printf("[DEBUG] png_write_row called with png_ptr=%p, row=%p\n", (void*)png_ptr, (void*)row);
+   
    /* 1.5.6: moved from png_struct to be a local structure: */
    png_row_info row_info;
 
@@ -884,6 +887,19 @@ png_write_row(png_structrp png_ptr, png_const_bytep row)
    png_debug1(3, "row_info->pixel_depth = %d", row_info.pixel_depth);
    png_debug1(3, "row_info->rowbytes = %lu", (unsigned long)row_info.rowbytes);
 
+   /* Debug prints before memcpy operation */
+   printf("[DEBUG] About to copy row data:\n");
+   printf("[DEBUG] - row_info.rowbytes = %lu\n", (unsigned long)row_info.rowbytes);
+   printf("[DEBUG] - png_ptr->row_buf at %p\n", (void*)(png_ptr->row_buf + 1));
+   printf("[DEBUG] - row at %p\n", (void*)row);
+   if (row != NULL && row_info.rowbytes > 0) {
+      printf("[DEBUG] - First few bytes of row: ");
+      for (size_t i = 0; i < (row_info.rowbytes > 16 ? 16 : row_info.rowbytes); i++) {
+         printf("%02x ", (unsigned char)row[i]);
+      }
+      printf("\n");
+   }
+   
    /* Copy user's row into buffer, leaving room for filter byte. */
    memcpy(png_ptr->row_buf + 1, row, row_info.rowbytes);
 
