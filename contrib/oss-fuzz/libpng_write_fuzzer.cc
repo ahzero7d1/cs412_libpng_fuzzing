@@ -5,10 +5,24 @@
 
 #include "png.h"
 
+// Memory write function for libpng
+static void png_memory_write(png_structp png_ptr, png_bytep data, png_size_t length) {
+  // This is a dummy write function - in a real fuzzer we might want to store this data
+  // but for demonstration of the vulnerability, we can just discard it
+  (void)png_ptr;  // Unused
+  (void)data;     // Unused
+  (void)length;   // Unused
+}
+
+// Dummy flush function
+static void png_memory_flush(png_structp png_ptr) {
+  // Do nothing
+  (void)png_ptr;  // Unused
+}
+
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   png_structp png_ptr;
   png_infop info_ptr;
-  FILE *fp;
   png_bytep row_data;
   png_uint_32 width = 999;  // Large width to maximize chances of overflow
   png_uint_32 height = 1;   // Just need one row
@@ -41,16 +55,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
       return 1;
   }
   
-  // Open file for writing
-  fp = std::fopen("crash_test.png", "wb");
-  if (!fp) {
-      std::fprintf(stderr, "Could not open file for writing\n");
-      png_destroy_write_struct(&png_ptr, &info_ptr);
-      return 1;
-  }
-  
-  // Initialize IO
-  png_init_io(png_ptr, fp);
+  // Set up custom write function instead of using files
+  png_set_write_fn(png_ptr, NULL, png_memory_write, png_memory_flush);
   
   // Set image attributes
   png_set_IHDR(png_ptr, info_ptr, width, height, bit_depth, color_type,
@@ -64,7 +70,6 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   row_data = (png_bytep)malloc(row_size);  // VULNERABILITY: Missing +1 for filter byte
   if (!row_data) {
       std::fprintf(stderr, "Out of memory\n");
-      std::fclose(fp);
       png_destroy_write_struct(&png_ptr, &info_ptr);
       return 1;
   }
@@ -82,7 +87,6 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   
   // Cleanup
   free(row_data);
-  std::fclose(fp);
   png_destroy_write_struct(&png_ptr, &info_ptr);
   
   std::printf("Successfully completed (should not reach here if overflow detected)\n");
