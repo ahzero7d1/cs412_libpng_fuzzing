@@ -196,7 +196,16 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
       handler.row_ptr[x] = (data_pos < size) ? data[data_pos++] : (data_pos + x) & 0xFF;
     }
     
-    // This call will cause a heap buffer overflow because libpng wants to access row_ptr[-1]
+    // Debug prints before calling png_write_row
+    printf("[FUZZER DEBUG] About to call png_write_row with row %u\n", y);
+    printf("[FUZZER DEBUG] rowbytes = %u\n", rowbytes);
+    printf("[FUZZER DEBUG] First 16 bytes of row buffer: ");
+    for (uint32_t i = 0; i < (rowbytes < 16 ? rowbytes : 16); i++) {
+      printf("%02x ", handler.row_ptr[i]);
+    }
+    printf("\n");
+    
+    // This call will cause a heap buffer overflow
     png_write_row(handler.png_ptr, handler.row_ptr);
   }
   

@@ -746,6 +746,22 @@ png_write_row(png_structrp png_ptr, png_const_bytep row)
    /* Debug print for function parameters */
    printf("[DEBUG] png_write_row called with png_ptr=%p, row=%p\n", (void*)png_ptr, (void*)row);
    
+   /* Print detailed info about png_ptr if available */
+   if (png_ptr != NULL) {
+      printf("[DEBUG] png_ptr details:\n");
+      printf("[DEBUG] - width: %u\n", png_ptr->width);
+      printf("[DEBUG] - height: %u\n", png_ptr->height);
+      printf("[DEBUG] - bit_depth: %d\n", png_ptr->bit_depth);
+      printf("[DEBUG] - color_type: %d\n", png_ptr->color_type);
+      printf("[DEBUG] - compression_type: %d\n", png_ptr->compression_type);
+      printf("[DEBUG] - filter_type: %d\n", png_ptr->filter_type);
+      printf("[DEBUG] - interlaced: %d\n", png_ptr->interlaced);
+      printf("[DEBUG] - row_number: %u\n", png_ptr->row_number);
+      printf("[DEBUG] - pass: %d\n", png_ptr->pass);
+   } else {
+      printf("[DEBUG] png_ptr is NULL!\n");
+   }
+   
    /* 1.5.6: moved from png_struct to be a local structure: */
    png_row_info row_info;
 
@@ -887,21 +903,39 @@ png_write_row(png_structrp png_ptr, png_const_bytep row)
    png_debug1(3, "row_info->pixel_depth = %d", row_info.pixel_depth);
    png_debug1(3, "row_info->rowbytes = %lu", (unsigned long)row_info.rowbytes);
 
-   /* Debug prints before memcpy operation */
+   /* Enhanced debug prints before memcpy operation */
    printf("[DEBUG] About to copy row data:\n");
    printf("[DEBUG] - row_info.rowbytes = %lu\n", (unsigned long)row_info.rowbytes);
    printf("[DEBUG] - png_ptr->row_buf at %p\n", (void*)(png_ptr->row_buf + 1));
    printf("[DEBUG] - row at %p\n", (void*)row);
+   
+   /* Print full row buffer content (helpful for fuzzing) */
    if (row != NULL && row_info.rowbytes > 0) {
-      printf("[DEBUG] - First few bytes of row: ");
-      for (size_t i = 0; i < (row_info.rowbytes > 16 ? 16 : row_info.rowbytes); i++) {
+      printf("[DEBUG] - First 32 bytes of row or full row if smaller: ");
+      size_t bytes_to_print = row_info.rowbytes > 32 ? 32 : row_info.rowbytes;
+      for (size_t i = 0; i < bytes_to_print; i++) {
          printf("%02x ", (unsigned char)row[i]);
       }
       printf("\n");
    }
    
+   /* Check if we have enough space in row_buf */
+   /* Row buffer size check - assuming it was allocated with sufficient space */
+   printf("[DEBUG] Checking memcpy parameters: \n");
+   printf("[DEBUG] - Source address: %p, Destination address: %p, Size: %lu\n", 
+          (void*)row, (void*)(png_ptr->row_buf + 1), (unsigned long)row_info.rowbytes);
+   
    /* Copy user's row into buffer, leaving room for filter byte. */
    memcpy(png_ptr->row_buf + 1, row, row_info.rowbytes);
+   
+   /* Check if memcpy succeeded */
+   printf("[DEBUG] Memcpy completed. Showing first few bytes at destination:\n");
+   printf("[DEBUG] - First bytes at row_buf+1 after copy: ");
+   size_t verify_bytes = row_info.rowbytes > 16 ? 16 : row_info.rowbytes;
+   for (size_t i = 0; i < verify_bytes; i++) {
+      printf("%02x ", (unsigned char)(png_ptr->row_buf + 1)[i]);
+   }
+   printf("\n");
 
 #ifdef PNG_WRITE_INTERLACING_SUPPORTED
    /* Handle interlacing */
