@@ -5,10 +5,23 @@
 
 #include "png.h"
 
+// This is the crash sample that triggered the heap buffer overflow
+const uint8_t kCrashData[] = {
+  // Width = 999 (0x03, 0xE7)
+  0x03, 0xE7,
+  // Height = 1
+  0x00, 0x01,
+  // Color type = 6 (RGBA)
+  0x06,
+  // Bit depth = 8
+  0x08,
+  // Just some data to fill the rest
+  0xAA, 0xBB, 0xCC, 0xDD
+};
+
 // Memory write function for libpng
 static void png_memory_write(png_structp png_ptr, png_bytep data, png_size_t length) {
-  // This is a dummy write function - in a real fuzzer we might want to store this data
-  // but for demonstration of the vulnerability, we can just discard it
+  // This is a dummy write function - we discard the output
   (void)png_ptr;  // Unused
   (void)data;     // Unused
   (void)length;   // Unused
@@ -21,16 +34,25 @@ static void png_memory_flush(png_structp png_ptr) {
 }
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
+  // Use our hard-coded crash data
+  data = kCrashData;
+  size = sizeof(kCrashData);
+
   png_structp png_ptr;
   png_infop info_ptr;
-  png_bytep row_data;
-  png_uint_32 width = 999;  // Large width to maximize chances of overflow
-  png_uint_32 height = 1;   // Just need one row
-  int bit_depth = 16;       // Use 16-bit depth (2 bytes per channel)
-  int color_type = PNG_COLOR_TYPE_RGBA;  // 4 channels
   
-  // Calculate row size: width * channels * bytes_per_channel
-  png_uint_32 row_size = width * 4 * (bit_depth / 8);
+  // Extract parameters from crash data
+  uint32_t width = (data[0] << 8) | data[1];    // 999
+  uint32_t height = (data[2] << 8) | data[3];   // 1
+  int color_type = data[4];                     // 6 (RGBA)
+  int bit_depth = data[5];                      // 8
+  
+  std::printf("Creating image with width=%u, height=%u, color_type=%d, bit_depth=%d\n", 
+               width, height, color_type, bit_depth);
+  
+  // Calculate row size in bytes (width * channels * bytes_per_channel)
+  // For RGBA with 8-bit depth: width * 4 * 1
+  png_uint_32 row_size = width * 4;
   std::printf("Row size: %u bytes\n", row_size);
   
   // Create PNG write structure
@@ -66,18 +88,18 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   png_write_info(png_ptr, info_ptr);
   
   // Here's the key vulnerability:
-  // We allocate exactly row_size bytes, but libpng needs row_size + 1 for the filter byte
-  row_data = (png_bytep)malloc(row_size);  // VULNERABILITY: Missing +1 for filter byte
+  // Allocate precisely row_size bytes but libpng needs row_size + 1 for the filter byte
+  png_bytep row_data = (png_bytep)malloc(row_size);  // VULNERABILITY: Missing +1 for filter byte
   if (!row_data) {
       std::fprintf(stderr, "Out of memory\n");
       png_destroy_write_struct(&png_ptr, &info_ptr);
       return 1;
   }
   
-  // Fill with some pattern data
+  // Fill with pattern data
   std::memset(row_data, 0xAA, row_size);
   
-  // This call will cause a buffer overflow because png_write_row 
+  // This call will cause a heap buffer overflow because png_write_row 
   // tries to use row_data[-1] as the filter byte
   std::printf("About to write row (buffer overflow will occur here)\n");
   png_write_row(png_ptr, row_data);
