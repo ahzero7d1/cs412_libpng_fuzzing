@@ -1,6 +1,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cstdint>
 
 #include "png.h"
 
@@ -8,7 +9,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   png_structp png_ptr;
   png_infop info_ptr;
   FILE *fp;
-  unsigned char *row_data;
+  png_bytep row_data;
   png_uint_32 width = 999;  // Large width to maximize chances of overflow
   png_uint_32 height = 1;   // Just need one row
   int bit_depth = 16;       // Use 16-bit depth (2 bytes per channel)
@@ -60,7 +61,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   
   // Here's the key vulnerability:
   // We allocate exactly row_size bytes, but libpng needs row_size + 1 for the filter byte
-  row_data = (unsigned char*)malloc(row_size);  // VULNERABILITY: Missing +1 for filter byte
+  row_data = (png_bytep)malloc(row_size);  // VULNERABILITY: Missing +1 for filter byte
   if (!row_data) {
       std::fprintf(stderr, "Out of memory\n");
       std::fclose(fp);
