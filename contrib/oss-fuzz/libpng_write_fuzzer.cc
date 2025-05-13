@@ -196,28 +196,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
       handler.row_ptr[x] = (data_pos < size) ? data[data_pos++] : (data_pos + x) & 0xFF;
     }
     
-    // Debug information - show buffer details right before the crash
-    std::fprintf(stderr, "right before the crash\n");
-    std::fprintf(stderr, "row_ptr address: %p, size: %u bytes\n", handler.row_ptr, rowbytes);
-    std::fprintf(stderr, "First 16 bytes of buffer: ");
-    for (uint32_t i = 0; i < (rowbytes < 16 ? rowbytes : 16); i++) {
-      std::fprintf(stderr, "%02x ", handler.row_ptr[i]);
-    }
-    std::fprintf(stderr, "\n");
-    
-    // IMPORTANT: Showing memory before the buffer - the byte at position -1 will be overwritten by png_write_row
-    std::fprintf(stderr, "Byte BEFORE buffer (will be overwritten): %02x\n", *((uint8_t*)handler.row_ptr - 1));
-    
-    // To force the vulnerability to manifest clearly, we need a small buffer allocation with no room before it
-    // The vulnerability is in pngwrite.c line ~888, where png_write_row tries to write a filter byte at buffer[-1]
-    std::fprintf(stderr, "=== CALLING png_write_row (VULNERABILITY at pngwrite.c:888) ===\n");
-    
     // This call will cause a heap buffer overflow because libpng wants to access row_ptr[-1]
     png_write_row(handler.png_ptr, handler.row_ptr);
-    
-    // If we get here, print what happened to the byte before the buffer (if not crashed)
-    std::fprintf(stderr, "Byte AFTER buffer (after potential overflow): %02x\n", *((uint8_t*)handler.row_ptr - 1));
-    std::fprintf(stderr, "=== If the value changed, overflow occurred but wasn't detected by ASAN ===\n");
   }
   
   // Finish writing
