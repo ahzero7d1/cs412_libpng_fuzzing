@@ -4,6 +4,7 @@
 #include <string.h>
 #include <png.h>
 #include <setjmp.h>
+#include <algorithm> // for std::min
 
 struct WriteBuffer {
     std::vector<uint8_t> data;
@@ -24,6 +25,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     png_structp png_ptr = nullptr;
     png_infop info_ptr = nullptr;
     jmp_buf jmpbuf;
+
     WriteBuffer out_buffer;
 
     do {
@@ -43,7 +45,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 
         png_set_write_fn(png_ptr, &out_buffer, custom_write, custom_flush);
 
-        uint32_t width  = (data[0] << 8) | data[1];
+        // Parse image metadata
+        uint32_t width = (data[0] << 8) | data[1];
         uint32_t height = (data[2] << 8) | data[3];
         if (width == 0 || height == 0 || width > 1024 || height > 1024) break;
 
@@ -76,9 +79,11 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         if (bit_depth == 16) bytes_per_pixel *= 2;
 
         png_size_t rowbytes = width * bytes_per_pixel;
-        const size_t max_allocation_size = 1024 * 1024 * 16;
-        if (rowbytes * height > max_allocation_size) break;
 
+        const size_t max_allocation_size = 1024 * 1024 * 16;
+        if (rowbytes > 0 && height > 0 && (rowbytes * height > max_allocation_size)) {
+            break;
+        }
         std::vector<uint8_t> image_data(rowbytes * height, 0);
         if (size > 32) {
             memcpy(image_data.data(), data + 32, std::min((size_t)(size - 32), image_data.size()));
@@ -110,8 +115,9 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 
         png_write_png(png_ptr, info_ptr, transforms, nullptr);
 
-    } while (0); // end of fuzzing logic
+    } while (0);  // End of fuzzing logic
 
     png_destroy_write_struct(&png_ptr, &info_ptr);
     return 0;
 }
+
