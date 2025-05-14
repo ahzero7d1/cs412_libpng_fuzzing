@@ -161,7 +161,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     return 0;
   }
 
-  png_uint_32 width, height;
+  png_uint_32 width, height, flag;
   int bit_depth, color_type, interlace_type, compression_type;
   int filter_type;
 
@@ -185,6 +185,15 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   png_set_scale_16(png_handler.png_ptr);
   png_set_tRNS_to_alpha(png_handler.png_ptr);
 
+  // Added more transform stack to hit pngtrans.c and pngrtran.c
+  png_set_strip_16(png_handler.png_ptr);
+  // png_set_filler(png_handler.png_ptr, 0xFF, PNG_FILLER_AFTER);
+  png_set_invert_alpha(png_handler.png_ptr);
+  png_set_bgr(png_handler.png_ptr);
+  png_set_swap(png_handler.png_ptr);
+  png_set_invert_mono(png_handler.png_ptr);
+  png_set_strip_alpha(png_handler.png_ptr);
+
   int passes = png_set_interlace_handling(png_handler.png_ptr);
 
   png_read_update_info(png_handler.png_ptr, png_handler.info_ptr);
@@ -201,6 +210,61 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   }
 
   png_read_end(png_handler.png_ptr, png_handler.end_info_ptr);
+
+  // Iman: Access as many pngget.c APIs as possible
+  png_get_bit_depth(png_handler.png_ptr, png_handler.info_ptr);
+  png_get_color_type(png_handler.png_ptr, png_handler.info_ptr);
+  png_get_filter_type(png_handler.png_ptr, png_handler.info_ptr);
+  png_get_compression_type(png_handler.png_ptr, png_handler.info_ptr);
+  png_get_interlace_type(png_handler.png_ptr, png_handler.info_ptr);
+  png_get_pixel_aspect_ratio(png_handler.png_ptr, png_handler.info_ptr);
+  png_get_x_offset_pixels(png_handler.png_ptr, png_handler.info_ptr);
+  png_get_y_offset_pixels(png_handler.png_ptr, png_handler.info_ptr);
+  png_get_rows(png_handler.png_ptr, png_handler.info_ptr);
+  png_get_image_width(png_handler.png_ptr, png_handler.info_ptr);
+  png_get_image_height(png_handler.png_ptr, png_handler.info_ptr);
+  png_get_valid(png_handler.png_ptr, png_handler.info_ptr, flag);
+  png_get_rowbytes(png_handler.png_ptr, png_handler.info_ptr);
+  png_get_rows(png_handler.png_ptr, png_handler.info_ptr);
+  png_get_channels(png_handler.png_ptr, png_handler.info_ptr);
+  png_get_image_width(png_handler.png_ptr, png_handler.info_ptr);
+  png_get_image_height(png_handler.png_ptr, png_handler.info_ptr);
+  png_get_bit_depth(png_handler.png_ptr, png_handler.info_ptr);
+  png_get_color_type(png_handler.png_ptr, png_handler.info_ptr);
+  png_get_filter_type(png_handler.png_ptr, png_handler.info_ptr);
+  png_get_interlace_type(png_handler.png_ptr, png_handler.info_ptr);
+  png_get_compression_type(png_handler.png_ptr, png_handler.info_ptr);
+  png_get_pixels_per_meter(png_handler.png_ptr, png_handler.info_ptr);
+  png_get_x_pixels_per_meter(png_handler.png_ptr, png_handler.info_ptr);
+  png_get_y_pixels_per_meter(png_handler.png_ptr, png_handler.info_ptr);
+  png_get_pixel_aspect_ratio(png_handler.png_ptr, png_handler.info_ptr);
+  png_get_pixel_aspect_ratio_fixed(png_handler.png_ptr, png_handler.info_ptr);
+  png_get_x_offset_pixels(png_handler.png_ptr, png_handler.info_ptr);
+  png_get_y_offset_pixels(png_handler.png_ptr, png_handler.info_ptr);
+  png_get_x_offset_microns(png_handler.png_ptr, png_handler.info_ptr);
+  png_get_y_offset_microns(png_handler.png_ptr, png_handler.info_ptr);
+
+
+  // png_get_valid(png_handler.png_ptr, png_handler.info_ptr, PNG_INFO_tIME);
+  
+  png_textp text_ptr;
+  int num_text;
+  if (png_get_text(png_handler.png_ptr, png_handler.info_ptr, &text_ptr, &num_text)) {
+    for (int i = 0; i < num_text; ++i) {
+      volatile auto* key = text_ptr[i].key;
+      volatile auto* val = text_ptr[i].text;
+    }
+  }
+
+  png_get_gAMA(png_handler.png_ptr, png_handler.info_ptr, nullptr);
+  png_get_sBIT(png_handler.png_ptr, png_handler.info_ptr, nullptr);
+  png_get_sRGB(png_handler.png_ptr, png_handler.info_ptr, nullptr);
+  // png_get_cHRM(png_handler.png_ptr, png_handler.info_ptr,
+  //               nullptr, nullptr, nullptr, nullptr,
+  //               nullptr, nullptr, nullptr);
+  png_get_tIME(png_handler.png_ptr, png_handler.info_ptr, nullptr);
+  png_get_PLTE(png_handler.png_ptr, png_handler.info_ptr, nullptr, nullptr);
+
 
   PNG_CLEANUP
 
