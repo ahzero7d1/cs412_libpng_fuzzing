@@ -1,76 +1,170 @@
+// libpng_write_fuzzer.cc
 #include <stddef.h>
 #include <stdint.h>
-#include <vector>
-#include <setjmp.h>
-#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <vector>
+#include <time.h>
 
+#define PNG_INTERNAL
 #include "png.h"
 
-// Custom error function to avoid abort()
-void custom_error_fn(png_structp png_ptr, png_const_charp error_msg) {
-    longjmp(png_jmpbuf(png_ptr), 1);
+#define PNG_CLEANUP \
+  if (png_handler.png_ptr) { \
+    if (png_handler.row_ptr) \
+      png_free(png_handler.png_ptr, png_handler.row_ptr); \
+    if (png_handler.end_info_ptr) \
+      png_destroy_write_struct(&png_handler.png_ptr, &png_handler.info_ptr); \
+    else if (png_handler.info_ptr) \
+      png_destroy_write_struct(&png_handler.png_ptr, &png_handler.info_ptr); \
+    else \
+      png_destroy_write_struct(&png_handler.png_ptr, nullptr); \
+    png_handler.png_ptr = nullptr; \
+    png_handler.row_ptr = nullptr; \
+    png_handler.info_ptr = nullptr; \
+    png_handler.end_info_ptr = nullptr; \
+  }
+
+struct WriteBuffer {
+  std::vector<uint8_t> data;
+};
+
+struct PngObjectHandler {
+  png_infop info_ptr = nullptr;
+  png_structp png_ptr = nullptr;
+  png_infop end_info_ptr = nullptr;
+  png_voidp row_ptr = nullptr;
+  WriteBuffer* write_buf = nullptr;
+
+  ~PngObjectHandler() {
+    if (row_ptr)
+      png_free(png_ptr, row_ptr);
+    if (info_ptr)
+      png_destroy_write_struct(&png_ptr, &info_ptr);
+    else
+      png_destroy_write_struct(&png_ptr, nullptr);
+    delete write_buf;
+  }
+};
+
+void user_write_data(png_structp png_ptr, png_bytep data, png_size_t length) {
+  WriteBuffer* buf = static_cast<WriteBuffer*>(png_get_io_ptr(png_ptr));
+  buf->data.insert(buf->data.end(), data, data + length);
 }
 
-// Custom write function that just discards output
-void custom_write(png_structp png_ptr, png_bytep data, png_size_t length) {
-    (void)png_ptr;
-    (void)data;
-    (void)length;
+void user_flush_data(png_structp) {
+  // Required stub
 }
 
-extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
-    if (size < 8) return 0;
+extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
+  if (size < 32) return 0;
 
-    // Initialize png write struct
-    png_structp png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
-    if (!png_ptr) return 0;
+  uint32_t width = (data[0] << 8) | data[1];
+  uint32_t height = (data[2] << 8) | data[3];
+  if (width == 0 || height == 0 || width > 1024 || height > 1024) return 0;
 
-    png_infop info_ptr = png_create_info_struct(png_ptr);
-    if (!info_ptr) {
-        png_destroy_write_struct(&png_ptr, nullptr);
-        return 0;
-    }
+  int color_type = data[4] % 6;
+  int interlace_type = data[5] % 2;
+  int filter_method = data[6] % 2;
 
-    // Set custom error handler
-    png_set_error_fn(png_ptr, nullptr, custom_error_fn, nullptr);
+  int bit_depth_options[] = {1, 2, 4, 8}; 
+  int bit_depth = bit_depth_options[data[8] % 4];
+  int compression_level = data[7] % 10;
 
-    if (setjmp(png_jmpbuf(png_ptr))) {
-        // If libpng triggers an error
-        png_destroy_write_struct(&png_ptr, &info_ptr);
-        return 0;
-    }
+  PngObjectHandler png_handler;
+  png_handler.write_buf = new WriteBuffer();
 
-    // Set custom output function (we discard the output)
-    png_set_write_fn(png_ptr, nullptr, custom_write, nullptr);
+  png_handler.png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
+  if (!png_handler.png_ptr) return 0;
 
-    // Hardcoded image parameters for now (simplified but valid)
-    png_uint_32 width = 1;
-    png_uint_32 height = 1;
-    int bit_depth = 8;
-    int color_type = PNG_COLOR_TYPE_RGB;
-
-    png_set_IHDR(png_ptr, info_ptr, width, height, bit_depth,
-                 color_type, PNG_INTERLACE_NONE,
-                 PNG_COMPRESSION_TYPE_BASE, PNG_FILTER_TYPE_BASE);
-
-    // Write the image info
-    png_write_info(png_ptr, info_ptr);
-
-    // Prepare a simple row (RGB)
-    std::vector<uint8_t> row(3 * width, 0xFF);
-    png_bytep row_ptrs[1] = { row.data() };
-
-    // Write image data
-    png_write_image(png_ptr, row_ptrs);
-
-    // Write end (also wrapped under setjmp above)
-    png_write_end(png_ptr, nullptr);
-
-    // Cleanup
-    png_destroy_write_struct(&png_ptr, &info_ptr);
+  png_handler.info_ptr = png_create_info_struct(png_handler.png_ptr);
+  if (!png_handler.info_ptr) {
+    PNG_CLEANUP
     return 0;
+  }
+
+  if (setjmp(png_jmpbuf(png_handler.png_ptr))) {
+    PNG_CLEANUP
+    return 0;
+  }
+
+  png_set_write_fn(png_handler.png_ptr, png_handler.write_buf, user_write_data, user_flush_data);
+
+  png_set_IHDR(png_handler.png_ptr, png_handler.info_ptr, width, height, bit_depth, color_type,
+               interlace_type, PNG_COMPRESSION_TYPE_BASE, filter_method);
+
+  png_set_compression_level(png_handler.png_ptr, compression_level);
+  png_set_filter(png_handler.png_ptr, PNG_FILTER_TYPE_BASE, PNG_ALL_FILTERS);
+
+  if (color_type == PNG_COLOR_TYPE_RGB || color_type == PNG_COLOR_TYPE_RGBA)
+    png_set_bgr(png_handler.png_ptr);
+  if (color_type == PNG_COLOR_TYPE_RGB || color_type == PNG_COLOR_TYPE_GRAY)
+    png_set_swap(png_handler.png_ptr);
+  if (bit_depth < 8)
+    png_set_packing(png_handler.png_ptr);
+
+  png_color_8 sig_bit = {
+    static_cast<png_byte>(bit_depth),
+    static_cast<png_byte>(bit_depth),
+    static_cast<png_byte>(bit_depth),
+    static_cast<png_byte>(bit_depth),
+    static_cast<png_byte>(bit_depth)
+  };
+  png_set_shift(png_handler.png_ptr, &sig_bit);
+
+  png_set_write_user_transform_fn(png_handler.png_ptr,
+    [](png_structp, png_row_infop row_info, png_bytep row) {
+      for (size_t i = 0; i < row_info->rowbytes; ++i)
+        row[i] ^= 0xFF;
+    });
+
+  png_text text_ptr[2];
+  text_ptr[0].compression = PNG_TEXT_COMPRESSION_NONE;
+  text_ptr[0].key = (char *)"Comment";
+  text_ptr[0].text = (char *)"Generated by fuzzer";
+
+  char fuzz_buf[32] = {0};
+  memcpy(fuzz_buf, &data[10], std::min(size - 10, sizeof(fuzz_buf) - 1));
+  text_ptr[1].compression = PNG_TEXT_COMPRESSION_NONE;
+  text_ptr[1].key = (char *)"FuzzKey";
+  text_ptr[1].text = fuzz_buf;
+
+  png_set_text(png_handler.png_ptr, png_handler.info_ptr, text_ptr, 2);
+
+  png_time png_time_now = {2025, 5, 13, 12, 34, 56};
+  png_set_tIME(png_handler.png_ptr, png_handler.info_ptr, &png_time_now);
+
+  if (color_type == PNG_COLOR_TYPE_PALETTE) {
+    png_color palette[2] = {{255, 0, 0}, {0, 255, 0}};
+    png_set_PLTE(png_handler.png_ptr, png_handler.info_ptr, palette, 2);
+  }
+
+#ifdef PNG_WRITE_UNKNOWN_CHUNKS_SUPPORTED
+  png_unknown_chunk unk;
+  memcpy(unk.name, "abcd", 4);
+  unk.data = const_cast<png_byte*>(&data[20]);
+  unk.size = std::min<size_t>(size - 20, 8);
+  unk.location = PNG_HAVE_IHDR;
+  png_set_unknown_chunks(png_handler.png_ptr, png_handler.info_ptr, &unk, 1);
+  png_set_unknown_chunk_location(png_handler.png_ptr, png_handler.info_ptr, 0, PNG_HAVE_IHDR);
+#endif
+
+  int rowbytes = (width * bit_depth + 7) / 8;
+  if (color_type == PNG_COLOR_TYPE_RGB) rowbytes *= 3;
+  else if (color_type == PNG_COLOR_TYPE_RGBA) rowbytes *= 4;
+
+  std::vector<uint8_t> image_data(rowbytes * height, 0);
+  std::vector<png_bytep> row_ptrs(height);
+  for (size_t i = 0; i < height; ++i)
+    row_ptrs[i] = image_data.data() + i * rowbytes;
+
+  png_set_rows(png_handler.png_ptr, png_handler.info_ptr, row_ptrs.data());
+  png_write_png(png_handler.png_ptr, png_handler.info_ptr, PNG_TRANSFORM_IDENTITY, nullptr);
+
+  PNG_CLEANUP
+  return 0;
 }
+
 
 
 
