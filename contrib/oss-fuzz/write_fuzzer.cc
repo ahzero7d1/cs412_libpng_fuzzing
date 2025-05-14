@@ -4,7 +4,6 @@
 #include <string.h>
 #include <png.h>
 #include <setjmp.h>
-#include <algorithm> // for std::min
 
 struct WriteBuffer {
     std::vector<uint8_t> data;
@@ -46,45 +45,38 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         png_set_write_fn(png_ptr, &out_buffer, custom_write, custom_flush);
 
         // Parse image metadata
-        uint32_t width = (data[0] << 8) | data[1];
+        uint32_t width  = (data[0] << 8) | data[1];
         uint32_t height = (data[2] << 8) | data[3];
         if (width == 0 || height == 0 || width > 1024 || height > 1024) break;
 
-        int color_type = data[4] % 6;
-        int bit_depths[] = {1, 2, 4, 8, 16};
-        int bit_depth = bit_depths[data[5] % 5];
+        int color_type   = data[4] % 6;
+        int bit_depths[] = {1, 2, 4, 8};
+        int bit_depth    = bit_depths[data[5] % 4];
         int interlace_type = data[6] % 2;
 
-        // Skip invalid combinations
+        // Avoid invalid combinations
         if ((color_type == PNG_COLOR_TYPE_PALETTE && bit_depth > 8) ||
             (color_type == PNG_COLOR_TYPE_RGB && bit_depth != 8 && bit_depth != 16) ||
             (color_type == PNG_COLOR_TYPE_RGB_ALPHA && bit_depth != 8 && bit_depth != 16) ||
-            (color_type == PNG_COLOR_TYPE_GRAY && bit_depth != 1 && bit_depth != 2 && bit_depth != 4 && bit_depth != 8 && bit_depth != 16) ||
+            (color_type == PNG_COLOR_TYPE_GRAY && bit_depth != 1 && bit_depth != 2 &&
+             bit_depth != 4 && bit_depth != 8 && bit_depth != 16) ||
             (color_type == PNG_COLOR_TYPE_GRAY_ALPHA && bit_depth != 8 && bit_depth != 16)) {
             break;
         }
 
+        // Set image header info
         png_set_IHDR(png_ptr, info_ptr, width, height, bit_depth,
                      color_type, interlace_type,
                      PNG_COMPRESSION_TYPE_BASE, PNG_FILTER_TYPE_BASE);
 
-        // Estimate channels and rowbytes manually
-        int channels = 1;
-        if (color_type == PNG_COLOR_TYPE_GRAY_ALPHA) channels = 2;
-        else if (color_type == PNG_COLOR_TYPE_RGB) channels = 3;
-        else if (color_type == PNG_COLOR_TYPE_RGB_ALPHA) channels = 4;
-        else if (color_type == PNG_COLOR_TYPE_PALETTE) channels = 1;
+        // Must call before using png_get_rowbytes
+        png_write_info(png_ptr, info_ptr);
 
-        int bytes_per_pixel = (bit_depth < 8) ? 1 : channels;
-        if (bit_depth == 16) bytes_per_pixel *= 2;
+        png_size_t rowbytes = png_get_rowbytes(png_ptr, info_ptr);
+        const size_t max_allocation_size = 1024 * 1024 * 16;  // 16MB
+        if (rowbytes == 0 || height == 0 || rowbytes * height > max_allocation_size) break;
 
-        png_size_t rowbytes = width * bytes_per_pixel;
-
-        const size_t max_allocation_size = 1024 * 1024 * 16;
-        if (rowbytes > 0 && height > 0 && (rowbytes * height > max_allocation_size)) {
-            break;
-        }
-        std::vector<uint8_t> image_data(rowbytes * height, 0);
+        std::vector<uint8_t> image_data(rowbytes * height + 16, 0); // safe padding
         if (size > 32) {
             memcpy(image_data.data(), data + 32, std::min((size_t)(size - 32), image_data.size()));
         }
@@ -95,10 +87,11 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 
         png_set_rows(png_ptr, info_ptr, row_pointers.data());
 
+        // Fuzz transform flags
         int transforms = 0;
         if (size > 31) {
             uint32_t val = ((data[28] << 24) | (data[29] << 16) |
-                            (data[30] << 8) | (data[31]));
+                            (data[30] << 8) | data[31]);
 
             if (val & (1 << 0))  transforms |= PNG_TRANSFORM_STRIP_16;
             if (val & (1 << 1))  transforms |= PNG_TRANSFORM_STRIP_ALPHA;
@@ -113,9 +106,10 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
             if (val & (1 << 10)) transforms |= PNG_TRANSFORM_SWAP_ENDIAN;
         }
 
+        // Write the PNG image
         png_write_png(png_ptr, info_ptr, transforms, nullptr);
 
-    } while (0);  // End of fuzzing logic
+    } while (0);  // Cleanup and exit
 
     png_destroy_write_struct(&png_ptr, &info_ptr);
     return 0;
