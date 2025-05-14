@@ -5,127 +5,156 @@
 #include <png.h>
 #include <setjmp.h>
 
-// --- In-memory write buffer ---
+//------------------------------------------------------------------------------
+// Custom error & warning handlers for libpng
+//------------------------------------------------------------------------------
+void user_error_fn(png_structp png_ptr, png_const_charp error_msg) {
+    // Grab our jmp_buf from the png error_ptr and longjmp back
+    jmp_buf* jb = static_cast<jmp_buf*>(png_get_error_ptr(png_ptr));
+    longjmp(*jb, 1);
+}
+
+void user_warning_fn(png_structp, png_const_charp) {
+    // No-op: ignore libpng warnings
+}
+
+//------------------------------------------------------------------------------
+// In-memory write implementation
+//------------------------------------------------------------------------------
 struct WriteBuffer {
     std::vector<uint8_t> data;
 };
 
-// Write callback
 void custom_write(png_structp png_ptr, png_bytep data, png_size_t length) {
-    auto* buf = static_cast<WriteBuffer*>(png_get_io_ptr(png_ptr));
+    WriteBuffer* buf = static_cast<WriteBuffer*>(png_get_io_ptr(png_ptr));
     buf->data.insert(buf->data.end(), data, data + length);
 }
-void custom_flush(png_structp) { /* no-op */ }
 
-// Error handler: on any png_error(), jump back to setjmp
-void user_error_fn(png_structp png_ptr, png_const_charp msg) {
-    jmp_buf* jb = static_cast<jmp_buf*>(png_get_error_ptr(png_ptr));
-    longjmp(*jb, 1);
+void custom_flush(png_structp) {
+    // No-op
 }
-// Warnings are ignored
-void user_warning_fn(png_structp, png_const_charp) {}
 
+//------------------------------------------------------------------------------
+// The fuzz entry point
+//------------------------------------------------------------------------------
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
-    if (size < 40) return 0;  // we need at least 40 bytes
+    // Need at least 40 bytes for header + transforms
+    if (size < 40) return 0;
 
-    jmp_buf jb;
-    // Create png_struct with our error/warning handlers
-    png_structp png_ptr = png_create_write_struct(
-        PNG_LIBPNG_VER_STRING,
-        &jb,               // this ptr passed to user_error_fn
-        user_error_fn,
-        user_warning_fn
-    );
-    if (!png_ptr) return 0;
+    jmp_buf jmpbuf;
+    WriteBuffer out_buffer;
+    png_structp png_ptr   = nullptr;
+    png_infop   info_ptr  = nullptr;
 
-    png_infop info_ptr = png_create_info_struct(png_ptr);
-    if (!info_ptr) {
-        png_destroy_write_struct(&png_ptr, nullptr);
-        return 0;
-    }
+    // Wrap everything in a do/while so we can `break` out on error
+    do {
+        // Create write struct with our error handlers!
+        png_ptr = png_create_write_struct(
+            PNG_LIBPNG_VER_STRING,
+            /* error_ptr */ &jmpbuf,
+            /* error_fn   */ user_error_fn,
+            /* warning_fn */ user_warning_fn
+        );
+        if (!png_ptr) break;
 
-    // Catch all png_error() calls here
-    if (setjmp(jb)) {
-        png_destroy_write_struct(&png_ptr, &info_ptr);
-        return 0;
-    }
+        info_ptr = png_create_info_struct(png_ptr);
+        if (!info_ptr) {
+            png_destroy_write_struct(&png_ptr, nullptr);
+            break;
+        }
 
-    // Install our write callbacks
-    WriteBuffer out;
-    png_set_write_fn(png_ptr, &out, custom_write, custom_flush);
+        // On any libpng error, jump back here
+        if (setjmp(jmpbuf)) {
+            png_destroy_write_struct(&png_ptr, &info_ptr);
+            break;
+        }
 
-    // --- Parse IHDR from fuzz data ---
-    // Force small dims so we don't allocate millions of bytes
-    uint32_t W = 1 + ((data[0]<<8 | data[1]) % 128);
-    uint32_t H = 1 + ((data[2]<<8 | data[3]) % 128);
+        // Install our in‐memory write callbacks
+        png_set_write_fn(png_ptr, &out_buffer, custom_write, custom_flush);
 
-    // Only these four color types (no palette)
-    int types[] = {
-      PNG_COLOR_TYPE_GRAY,
-      PNG_COLOR_TYPE_GRAY_ALPHA,
-      PNG_COLOR_TYPE_RGB,
-      PNG_COLOR_TYPE_RGB_ALPHA
-    };
-    int ct = types[data[4] % 4];
+        // --- read IHDR fields from fuzzer data ---
+        uint32_t width  = 1 + ((data[0] << 8) | data[1]) % 256;
+        uint32_t height = 1 + ((data[2] << 8) | data[3]) % 256;
 
-    int depths[] = {1,2,4,8,16};
-    int bd = depths[data[5] % 5];
+        static const int color_type_choices[] = {
+            PNG_COLOR_TYPE_GRAY,
+            PNG_COLOR_TYPE_GRAY_ALPHA,
+            PNG_COLOR_TYPE_RGB,
+            PNG_COLOR_TYPE_RGB_ALPHA,
+            PNG_COLOR_TYPE_PALETTE
+        };
+        int color_type = color_type_choices[data[4] % 5];
 
-    // Reject invalid combos
-    bool bad = false;
-    if ((ct & PNG_COLOR_MASK_COLOR) && bd!=8 && bd!=16) bad = true;
-    if (!(ct & PNG_COLOR_MASK_COLOR) && bd!=1&&bd!=2&&bd!=4&&bd!=8&&bd!=16) bad = true;
-    if (bad) {
-      png_destroy_write_struct(&png_ptr,&info_ptr);
-      return 0;
-    }
+        static const int bit_depth_choices[] = {1, 2, 4, 8, 16};
+        int bit_depth = bit_depth_choices[data[5] % 5];
 
-    int interlace = data[6] % 2;
-    png_set_IHDR(png_ptr, info_ptr, W, H, bd, ct,
-                 interlace,
-                 PNG_COMPRESSION_TYPE_BASE,
-                 PNG_FILTER_TYPE_BASE);
+        // Skip invalid depth/type combos
+        bool invalid = false;
+        if ((color_type == PNG_COLOR_TYPE_PALETTE && bit_depth > 8) ||
+            (color_type == PNG_COLOR_TYPE_RGB      && bit_depth != 8  && bit_depth != 16) ||
+            (color_type == PNG_COLOR_TYPE_RGB_ALPHA&& bit_depth != 8  && bit_depth != 16) ||
+            (color_type == PNG_COLOR_TYPE_GRAY &&
+               !(bit_depth==1||bit_depth==2||bit_depth==4||bit_depth==8||bit_depth==16)) ||
+            (color_type == PNG_COLOR_TYPE_GRAY_ALPHA && bit_depth != 8 && bit_depth != 16))
+            invalid = true;
+        if (invalid) break;
 
-    // Build a zero-image
-    png_size_t rowbytes = png_get_rowbytes(png_ptr, info_ptr);
-    const size_t MAX_PIX = 1<<24;
-    if (rowbytes==0 || (size_t)rowbytes*H > MAX_PIX) {
-      png_destroy_write_struct(&png_ptr,&info_ptr);
-      return 0;
-    }
+        int interlace_type = data[6] % 2;
 
-    std::vector<uint8_t> img(rowbytes * H);
-    // Seed it with the remainder of data
-    if (size > 40) {
-      memcpy(img.data(), data+40, std::min<size_t>(img.size(), size-40));
-    }
+        // Set IHDR
+        png_set_IHDR(
+            png_ptr, info_ptr,
+            width, height,
+            bit_depth, color_type, interlace_type,
+            PNG_COMPRESSION_TYPE_BASE,
+            PNG_FILTER_TYPE_BASE
+        );
 
-    std::vector<png_bytep> rows(H);
-    for (unsigned y=0; y<H; y++)
-      rows[y] = img.data() + y*rowbytes;
-    png_set_rows(png_ptr, info_ptr, rows.data());
+        // Compute rowbytes & guard against huge allocation
+        png_size_t rowbytes = png_get_rowbytes(png_ptr, info_ptr);
+        const size_t MAX_PIXELS = 16u << 20;  // 16 MiB
+        if (rowbytes == 0 || (size_t)rowbytes * height > MAX_PIXELS) break;
 
-    // Decode a 32-bit transform mask from bytes [36..39]
-    uint32_t mask = (data[36]<<24)|(data[37]<<16)|(data[38]<<8)|data[39];
-    int transforms = 0;
-    if (mask & (1<<0)) transforms |= PNG_TRANSFORM_STRIP_16;
-    if (mask & (1<<1)) transforms |= PNG_TRANSFORM_STRIP_ALPHA;
-    if (mask & (1<<2)) transforms |= PNG_TRANSFORM_PACKING;
-    if (mask & (1<<3)) transforms |= PNG_TRANSFORM_PACKSWAP;
-    if (mask & (1<<4)) transforms |= PNG_TRANSFORM_EXPAND;
-    if (mask & (1<<5)) transforms |= PNG_TRANSFORM_INVERT_MONO;
-    if (mask & (1<<6)) transforms |= PNG_TRANSFORM_SHIFT;
-    if (mask & (1<<7)) transforms |= PNG_TRANSFORM_BGR;
-    if (mask & (1<<8)) transforms |= PNG_TRANSFORM_SWAP_ALPHA;
-    if (mask & (1<<9)) transforms |= PNG_TRANSFORM_INVERT_ALPHA;
-    if (mask & (1<<10))transforms |= PNG_TRANSFORM_SWAP_ENDIAN;
+        // Fill pixel buffer from the remainder of the input
+        std::vector<uint8_t> image_data(rowbytes * height, 0);
+        size_t copy_len = std::min((size_t)(size - 40), image_data.size());
+        memcpy(image_data.data(), data + 40, copy_len);
 
-    // This now returns normally or jumps back on error:
-    png_write_png(png_ptr, info_ptr, transforms, nullptr);
+        // Build row pointers
+        std::vector<png_bytep> row_pointers(height);
+        for (size_t y = 0; y < height; ++y) {
+            row_pointers[y] = image_data.data() + y * rowbytes;
+        }
+        png_set_rows(png_ptr, info_ptr, row_pointers.data());
 
+        // Extract transform flags
+        uint32_t val = (uint32_t(data[36]) << 24)
+                     | (uint32_t(data[37]) << 16)
+                     | (uint32_t(data[38]) <<  8)
+                     | (uint32_t(data[39])      );
+        int transforms = 0;
+        if (val & (1u <<  0)) transforms |= PNG_TRANSFORM_STRIP_16;
+        if (val & (1u <<  1)) transforms |= PNG_TRANSFORM_STRIP_ALPHA;
+        if (val & (1u <<  2)) transforms |= PNG_TRANSFORM_PACKING;
+        if (val & (1u <<  3)) transforms |= PNG_TRANSFORM_PACKSWAP;
+        if (val & (1u <<  4)) transforms |= PNG_TRANSFORM_EXPAND;
+        if (val & (1u <<  5)) transforms |= PNG_TRANSFORM_INVERT_MONO;
+        if (val & (1u <<  6)) transforms |= PNG_TRANSFORM_SHIFT;
+        if (val & (1u <<  7)) transforms |= PNG_TRANSFORM_BGR;
+        if (val & (1u <<  8)) transforms |= PNG_TRANSFORM_SWAP_ALPHA;
+        if (val & (1u <<  9)) transforms |= PNG_TRANSFORM_INVERT_ALPHA;
+        if (val & (1u << 10)) transforms |= PNG_TRANSFORM_SWAP_ENDIAN;
+
+        // Finally: run the high-level write API
+        png_write_png(png_ptr, info_ptr, transforms, nullptr);
+
+    } while (0);
+
+    // Clean up
     png_destroy_write_struct(&png_ptr, &info_ptr);
     return 0;
 }
+
 
 
 
