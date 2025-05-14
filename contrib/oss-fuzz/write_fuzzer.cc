@@ -54,6 +54,15 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         int bit_depth    = bit_depths[data[5] % 4];
         int interlace_type = data[6] % 2;
 
+        // Avoid invalid color_type + bit_depth combinations
+        if ((color_type == PNG_COLOR_TYPE_PALETTE && bit_depth > 8) ||
+            (color_type == PNG_COLOR_TYPE_RGB && bit_depth != 8 && bit_depth != 16) ||
+            (color_type == PNG_COLOR_TYPE_RGB_ALPHA && bit_depth != 8 && bit_depth != 16) ||
+            (color_type == PNG_COLOR_TYPE_GRAY && bit_depth != 1 && bit_depth != 2 && bit_depth != 4 && bit_depth != 8 && bit_depth != 16) ||
+            (color_type == PNG_COLOR_TYPE_GRAY_ALPHA && bit_depth != 8 && bit_depth != 16)) {
+             break; // Skip invalid combo
+             }
+
         png_set_IHDR(png_ptr, info_ptr, width, height, bit_depth,
                      color_type, interlace_type,
                      PNG_COMPRESSION_TYPE_BASE, PNG_FILTER_TYPE_BASE);
