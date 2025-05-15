@@ -13,9 +13,8 @@
 struct FuzzerWriteContext {
     png_structp png_ptr = nullptr;
     png_infop info_ptr = nullptr;
-    std::vector<uint8_t> output_buffer; // Buffer to write PNG data into
-    jmp_buf jmpbuf; // For libpng error handling
-    // Add members for derived PNG parameters and ancillary data buffers
+    std::vector<uint8_t> output_buffer; 
+    jmp_buf jmpbuf;
     uint32_t width = 0;
     uint32_t height = 0;
     int bit_depth = 0;
