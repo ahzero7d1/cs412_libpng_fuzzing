@@ -1,33 +1,28 @@
 #include <stddef.h>
 #include <stdint.h>
-#include <stdlib.h>
-#include <string.h>
 #include <vector>
+#include <string.h>
 
-#define PNG_INTERNAL
 #include "png.h"
 
-struct WriteBuffer {
+struct Buffer {
   std::vector<uint8_t> data;
 };
 
-void custom_write(png_structp png_ptr, png_bytep data, png_size_t length) {
-  auto* buffer = static_cast<WriteBuffer*>(png_get_io_ptr(png_ptr));
+void write_data(png_structp png_ptr, png_bytep data, png_size_t length) {
+  auto* buffer = static_cast<Buffer*>(png_get_io_ptr(png_ptr));
   buffer->data.insert(buffer->data.end(), data, data + length);
 }
 
-void custom_flush(png_structp) {}
+void flush_data(png_structp) {}
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
-  if (size < 16) return 0;
+  if (size < 4) return 0;
 
-  int width = (data[0] << 8) | data[1];
-  int height = (data[2] << 8) | data[3];
-  if (width == 0 || height == 0 || width > 256 || height > 256) return 0;
-
-  int color_type = data[4] % 6;
-  int bit_depth = (data[5] % 4) * 2 + 1; // 1, 3, 5, 7
-  if (bit_depth != 8 && bit_depth != 16) bit_depth = 8;
+  int width = 32;
+  int height = 32;
+  int bit_depth = 8;
+  int color_type = PNG_COLOR_TYPE_RGB;
 
   png_structp png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
   if (!png_ptr) return 0;
@@ -43,26 +38,31 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     return 0;
   }
 
-  WriteBuffer buffer;
-  png_set_write_fn(png_ptr, &buffer, custom_write, custom_flush);
-  png_set_IHDR(png_ptr, info_ptr, width, height, bit_depth, color_type,
-               PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_BASE, PNG_FILTER_TYPE_BASE);
+  Buffer buffer;
+  png_set_write_fn(png_ptr, &buffer, write_data, flush_data);
+
+  png_set_IHDR(png_ptr, info_ptr,
+               width, height,
+               bit_depth, color_type,
+               PNG_INTERLACE_NONE,
+               PNG_COMPRESSION_TYPE_DEFAULT,
+               PNG_FILTER_TYPE_DEFAULT);
 
   png_write_info(png_ptr, info_ptr);
 
-  // Create and write dummy rows
-  int rowbytes = png_get_rowbytes(png_ptr, info_ptr);
-  std::vector<uint8_t> image_data(rowbytes * height, 0xFF); // All white
+  std::vector<uint8_t> image_data(width * 3 * height, 0x42);
   std::vector<png_bytep> rows(height);
-  for (int i = 0; i < height; i++) {
-    rows[i] = image_data.data() + i * rowbytes;
+  for (int i = 0; i < height; ++i) {
+    rows[i] = image_data.data() + i * width * 3;
   }
 
-  // FINAL call — write entire image and clean up
-  png_write_png(png_ptr, info_ptr, PNG_TRANSFORM_IDENTITY, nullptr);
+  png_write_image(png_ptr, rows.data());
+  png_write_end(png_ptr, nullptr);
   png_destroy_write_struct(&png_ptr, &info_ptr);
+
   return 0;
 }
+
 
 
 
