@@ -2,7 +2,6 @@
 #include <stdint.h>
 #include <vector>
 #include <string.h>
-
 #include "png.h"
 
 struct Buffer {
@@ -10,19 +9,19 @@ struct Buffer {
 };
 
 void write_data(png_structp png_ptr, png_bytep data, png_size_t length) {
-  auto* buffer = static_cast<Buffer*>(png_get_io_ptr(png_ptr));
-  buffer->data.insert(buffer->data.end(), data, data + length);
+  auto* buf = static_cast<Buffer*>(png_get_io_ptr(png_ptr));
+  buf->data.insert(buf->data.end(), data, data + length);
 }
 
 void flush_data(png_structp) {}
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
-  if (size < 4) return 0;
+  if (size < 1) return 0;
 
-  int width = 32;
-  int height = 32;
-  int bit_depth = 8;
-  int color_type = PNG_COLOR_TYPE_RGB;
+  const int width = 8;
+  const int height = 8;
+  const int bit_depth = 8;
+  const int color_type = PNG_COLOR_TYPE_RGB;
 
   png_structp png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
   if (!png_ptr) return 0;
@@ -38,30 +37,28 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     return 0;
   }
 
-  Buffer buffer;
-  png_set_write_fn(png_ptr, &buffer, write_data, flush_data);
+  Buffer buf;
+  png_set_write_fn(png_ptr, &buf, write_data, flush_data);
 
   png_set_IHDR(png_ptr, info_ptr,
                width, height,
                bit_depth, color_type,
                PNG_INTERLACE_NONE,
-               PNG_COMPRESSION_TYPE_DEFAULT,
-               PNG_FILTER_TYPE_DEFAULT);
+               PNG_COMPRESSION_TYPE_BASE,
+               PNG_FILTER_TYPE_BASE);
 
-  png_write_info(png_ptr, info_ptr);
+  // Prepare image data: RGB for each pixel
+  std::vector<uint8_t> image_data(width * height * 3, 0xFF);
+  std::vector<png_bytep> row_ptrs(height);
+  for (int y = 0; y < height; ++y)
+    row_ptrs[y] = image_data.data() + y * width * 3;
 
-  std::vector<uint8_t> image_data(width * 3 * height, 0x42);
-  std::vector<png_bytep> rows(height);
-  for (int i = 0; i < height; ++i) {
-    rows[i] = image_data.data() + i * width * 3;
-  }
+  png_write_png(png_ptr, info_ptr, PNG_TRANSFORM_IDENTITY, row_ptrs.data());
 
-  png_write_image(png_ptr, rows.data());
-  png_write_end(png_ptr, nullptr);
   png_destroy_write_struct(&png_ptr, &info_ptr);
-
   return 0;
 }
+
 
 
 
